@@ -1,0 +1,764 @@
+/*
+ * ICE 계열 공통 다크 톤(ICEPDF 계승)을 그대로 쓴다. ICECrawler·ICEFiction과 같은
+ * 회색 계단을 공유하고, 액센트만 이 앱의 것으로 바꾼다 — IceCmd의 아이콘 크리스탈에서
+ * 딴 청록이다. 액센트 위 글자는 흰색 대비가 부족해서 어두운 색을 얹는다.
+ */
+:root {
+  --bg: #2b2b2b;
+  --sidebar: #252526;
+  --toolbar: #2a2b2e;
+  --panel: #2d2d30;
+  --terminal-bg: #1e1e1e;
+  --text: #e8e8e8;
+  --muted: #9498a0;
+  --hint: #6b6f77;
+  --border: #3c3e44;
+  /* 패널 사이 이음선은 --border보다 어둡다 (ICE 공통 습관) */
+  --seam: #1a1a1a;
+  --well: #1c1d20;
+  --row-hover: #2f2f30;
+
+  --btn-bg: #3c3c3c;
+  --btn-hover: #4a4a4a;
+  --btn-border: #555555;
+  --input-bg: #1e1e1e;
+
+  --accent: #24a6a9;
+  --accent-hi: #92d6dd;
+  --accent-soft: rgba(42, 191, 193, 0.3);
+  --on-accent: #08211f;
+
+  --dirty: #e0a83b;
+  --danger: #b62324;
+  --ok: #57c98a;
+
+  /*
+   * "Segoe UI Emoji"가 "Malgun Gothic"보다 앞에 있어야 ☕이 컬러로 나온다.
+   * Malgun Gothic이 U+2615를 흑백 글리프로 갖고 있어서 뒤에 두면 그쪽이 먼저 잡힌다.
+   * (Segoe UI Emoji에는 한글이 없으므로 한글은 그대로 Malgun Gothic으로 떨어진다.)
+   */
+  --font: "Segoe UI", "Segoe UI Emoji", "Malgun Gothic", sans-serif;
+  /*
+   * D2Coding을 앞에 두는 것은 취향이 아니라 기능이다: 한글 글자폭이 라틴 문자의 정확히
+   * 2배여서 xterm의 셀 계산과 어긋나지 않는다. 없으면 ICE 공통 스택으로 내려간다.
+   */
+  --font-mono: "D2Coding", ui-monospace, Consolas, monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  /* 문서가 아니라 앱이다. 터미널 안에서만 선택을 다시 허용한다. */
+  user-select: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 4px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--btn-hover);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+:focus {
+  outline: none;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 140, 140, 0.25);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 140, 140, 0.5);
+  background-clip: padding-box;
+}
+
+.app-shell {
+  display: flex;
+  height: 100%;
+}
+
+/* ---------- panel resize strips ---------- */
+
+.panel-resize {
+  flex: 0 0 4px;
+  background: var(--seam);
+  cursor: col-resize;
+}
+
+.panel-resize:hover {
+  background: var(--accent-hi);
+}
+
+/* ---------- sidebar ---------- */
+
+/*
+ * 화면 배율은 크롬에만 걸고 터미널에는 걸지 않는다. 터미널 글자는 별도 설정이고,
+ * 두 배율이 곱해지면 사용자가 예측할 수 없다.
+ * `transform: scale`이 아니라 `zoom`을 쓰는 이유: zoom은 레이아웃을 다시 계산해서
+ * 배율을 올려도 플렉스 폭 계산이 맞는다.
+ */
+.sidebar-wrap,
+.rightpanel-wrap,
+.pane-toolbar {
+  zoom: var(--ui-scale, 1);
+}
+
+.sidebar-wrap,
+.rightpanel-wrap {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--sidebar);
+}
+
+/*
+ * 섹션 제목은 11px 대문자 라벨로 두지 않는다. 목록 줄과 굵기가 비슷해져 계층이
+ * 뭉개진다 — ICEFiction에서 같은 이유로 걷어낸 패턴이다.
+ */
+.sidebar-title,
+.tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: var(--text);
+  background: var(--toolbar);
+  border-bottom: 1px solid var(--seam);
+}
+
+.zoom-readout {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--hint);
+  font-variant-numeric: tabular-nums;
+}
+
+.project-list {
+  flex: 1;
+  padding: 6px 0;
+  overflow-y: auto;
+  border: 1px dashed transparent;
+}
+
+.project-list.drop-active {
+  border-color: var(--accent-hi);
+  background: var(--accent-soft);
+}
+
+.sidebar-empty {
+  margin: 24px 12px;
+  color: var(--hint);
+  text-align: center;
+  line-height: 1.8;
+}
+
+/*
+ * 각진 행 + 왼쪽에 곧은 세로 바. 라운드 모서리에 inset 그림자를 쓰면 강조선이
+ * 모서리를 따라 휘어 괄호처럼 보인다 — 그래서 라운드를 쓰지 않는다.
+ */
+.project-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 10px 5px 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.project-item:hover {
+  background: var(--row-hover);
+}
+
+.project-item.project-active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.project-item.project-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent-hi);
+}
+
+.project-name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project-panes {
+  padding: 0 5px;
+  font-size: 10px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- status indicators ---------- */
+
+.status {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  line-height: 12px;
+  text-align: center;
+}
+
+.status-attention {
+  display: block;
+  color: var(--dirty);
+  animation: nudge 1.6s ease-in-out infinite;
+}
+
+.status-attention svg {
+  display: block;
+}
+
+/* Selected rows are filled with the accent, where amber would disappear. */
+.project-active .status-attention {
+  color: var(--on-accent);
+}
+
+@keyframes nudge {
+  0%,
+  70%,
+  100% {
+    transform: rotate(0deg);
+  }
+  78% {
+    transform: rotate(-14deg);
+  }
+  86% {
+    transform: rotate(12deg);
+  }
+}
+
+.status-idle {
+  border-radius: 50%;
+  background: #3f4248;
+  transform: scale(0.5);
+}
+
+/* CSS만으로 도는 링: 이미지도, 프레임 단위 JS도 없다. */
+.status-busy {
+  border: 2px solid rgba(224, 168, 59, 0.25);
+  border-top-color: var(--dirty);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- context menu ---------- */
+
+.context-menu {
+  position: fixed;
+  z-index: 400;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+.context-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 14px;
+  text-align: left;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+}
+
+.context-menu button:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* ---------- workspace, panes, dividers ---------- */
+
+.workspace {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+}
+
+.project-stage,
+.pane-stage {
+  position: absolute;
+  inset: 0;
+}
+
+/* 페인은 중첩되지 않은 절대 위치 형제다 — 배치가 바뀌어도 스타일만 바뀐다. */
+.pane-slot {
+  position: absolute;
+  overflow: hidden;
+}
+
+.pane-stage-dragging .pane-slot {
+  /* 드래그 중에는 터미널이 포인터를 먹지 않아야 히트테스트가 정확하다. */
+  pointer-events: none;
+}
+
+.pane-slot-source {
+  opacity: 0.45;
+}
+
+.divider {
+  position: absolute;
+  z-index: 6;
+  background: var(--seam);
+}
+
+.divider:hover {
+  background: var(--accent-hi);
+}
+
+.divider-row {
+  cursor: col-resize;
+}
+
+.divider-col {
+  cursor: row-resize;
+}
+
+.drop-preview {
+  position: absolute;
+  z-index: 20;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-hi);
+  pointer-events: none;
+}
+
+.pane-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--terminal-bg);
+  border: 1px solid transparent;
+}
+
+.pane-frame.pane-focused {
+  border-color: var(--border);
+}
+
+.pane-toolbar {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.pane-frame:hover .pane-toolbar {
+  opacity: 1;
+}
+
+.pane-kind {
+  padding: 0 6px;
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--well);
+  border-radius: 3px;
+}
+
+.pane-toolbar button {
+  width: 20px;
+  height: 18px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  background: var(--well);
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.pane-toolbar button:hover {
+  color: var(--text);
+  background: var(--btn-hover);
+}
+
+.pane-grip {
+  cursor: grab;
+}
+
+.pane-close:hover {
+  background: var(--danger) !important;
+  color: #fff;
+}
+
+.terminal-host {
+  width: 100%;
+  height: 100%;
+  padding: 4px 0 0 6px;
+  overflow: hidden;
+  /* 크롬은 선택 불가지만 터미널 내용은 복사할 수 있어야 한다. */
+  user-select: text;
+}
+
+.terminal-host .xterm {
+  height: 100%;
+}
+
+.empty-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--hint);
+  text-align: center;
+  line-height: 2;
+}
+
+/* ---------- right panel ---------- */
+
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--panel);
+}
+
+.right-panel-empty {
+  flex: 1;
+  padding: 16px 12px;
+  color: var(--hint);
+}
+
+/* ---------- right panel footer: sizes and support ---------- */
+
+.panel-footer {
+  flex: 0 0 auto;
+  padding: 10px 10px 12px;
+  background: var(--toolbar);
+  border-top: 1px solid var(--seam);
+}
+
+/* 두 설정을 한 묶음으로 보이게: 묶음 사이 간격 > 라벨과 슬라이더 사이 간격 */
+.scale-control {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.scale-group {
+  display: grid;
+  gap: 6px;
+}
+
+.scale-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.scale-label {
+  flex: 1;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.scale-row button {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.scale-row button:hover {
+  border-color: var(--accent-hi);
+  color: var(--accent-hi);
+  background: transparent;
+}
+
+.scale-row .scale-value {
+  width: 50px;
+  font-size: 11px;
+  color: var(--text);
+  border-color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+
+.scale-group input[type="range"] {
+  display: block;
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent-hi);
+}
+
+.site-link,
+.support-open {
+  width: 100%;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.site-link {
+  margin-bottom: 5px;
+}
+
+.site-link:hover {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent-hi);
+}
+
+.support-open:hover {
+  color: #0d0c22;
+  background: #ffdd00;
+  border-color: #ffdd00;
+}
+
+/* ---------- support modal ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.support-dialog {
+  width: 340px;
+  max-width: 90vw;
+  padding: 22px 20px 18px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+.support-dialog h2 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.support-sub {
+  margin: 2px 0 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* QR must sit on white or scanners struggle with it. */
+.support-qr {
+  display: inline-grid;
+  place-items: center;
+  padding: 8px;
+  background: #fff;
+  border-radius: 10px;
+}
+
+.support-qr img {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.support-copy {
+  margin: 14px 0;
+  font-size: 13px;
+  color: #cdd0d6;
+}
+
+.coffee-button {
+  width: 100%;
+  padding: 12px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0d0c22;
+  background: #ffdd00;
+  border: none;
+  border-radius: 10px;
+}
+
+.coffee-button:hover:not(:disabled) {
+  background: #ffe53d;
+}
+
+.support-url {
+  margin: 10px 0 12px;
+  font-size: 11px;
+  color: #7c818b;
+}
+
+.support-close {
+  padding: 5px 18px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+}
+
+/* 좌우 여백은 하단 컨트롤과 같은 10px로 맞춘다. */
+.cli-buttons {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  background: var(--toolbar);
+  border-bottom: 1px solid var(--seam);
+}
+
+.cli-buttons button {
+  flex: 1;
+  padding: 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.cli-buttons button:hover {
+  background: var(--accent);
+  border-color: var(--accent-hi);
+  color: var(--on-accent);
+}
+
+.folder-tree {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.tree-header button {
+  padding: 1px 7px;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.tree-header button:hover {
+  color: var(--accent-hi);
+  border-color: var(--accent-hi);
+  background: transparent;
+}
+
+.tree-body {
+  flex: 1;
+  padding: 4px 0 12px;
+  overflow: auto;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
+  white-space: nowrap;
+  color: var(--muted);
+  cursor: default;
+}
+
+.tree-row.tree-dir {
+  color: #cdd0d6;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tree-row:hover {
+  background: var(--row-hover);
+}
+
+.tree-caret {
+  display: inline-block;
+  width: 10px;
+  font-size: 9px;
+  color: var(--accent-hi);
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-note {
+  margin: 2px 0 2px 18px;
+  font-size: 11px;
+  color: var(--hint);
+}
