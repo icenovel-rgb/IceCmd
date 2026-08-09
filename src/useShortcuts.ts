@@ -5,8 +5,7 @@
  */
 import { useEffect } from "react";
 import { DEFAULT_UI, useWorkspace } from "./store/workspace";
-import { getEntry } from "./terminal/termRegistry";
-import { writeSession } from "./terminal/ipc";
+import { copySelection, pasteInto, selectionOf } from "./terminal/clipboard";
 
 /** Ctrl+= and Ctrl++ both mean "bigger", across keyboard layouts. */
 const ZOOM_IN_KEYS = new Set(["+", "=", "Add"]);
@@ -57,20 +56,17 @@ export function useShortcuts(): void {
           consume();
           closePane(paneId);
           break;
-        case "c": {
-          const selection = getEntry(paneId)?.term.getSelection();
-          if (selection) {
+        // Both share their implementation with the pane's context menu.
+        case "c":
+          // Without a selection the keystroke belongs to the shell (Ctrl+C).
+          if (selectionOf(paneId)) {
             consume();
-            void navigator.clipboard.writeText(selection).catch(() => {});
+            void copySelection(paneId);
           }
           break;
-        }
         case "v":
           consume();
-          void navigator.clipboard
-            .readText()
-            .then((text) => (text ? writeSession(paneId, text) : undefined))
-            .catch(() => {});
+          void pasteInto(paneId);
           break;
         default:
           break;

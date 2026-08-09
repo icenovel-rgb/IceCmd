@@ -88,7 +88,8 @@ interface WorkspaceState {
   setFocusedPane: (projectId: string, paneId: string) => void;
 
   splitPaneWith: (paneId: string, dir: SplitDir, kind: SessionKind) => void;
-  openCli: (projectId: string, kind: SessionKind) => void;
+  /** `cwd` defaults to the project folder; the folder tree passes a subfolder. */
+  openCli: (projectId: string, kind: SessionKind, cwd?: string) => void;
   closePane: (paneId: string) => void;
   adjustRatio: (projectId: string, path: string, ratio: number) => void;
   movePaneTo: (projectId: string, sourceId: string, targetId: string, edge: DropEdge) => void;
@@ -199,7 +200,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }));
   },
 
-  openCli: (projectId, kind) => {
+  openCli: (projectId, kind, cwd) => {
     const state = get();
     const project = state.projects.find((p) => p.id === projectId);
     if (!project) return;
@@ -218,7 +219,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       layouts: { ...state.layouts, [projectId]: nextLayout },
       panes: {
         ...state.panes,
-        [created]: { paneId: created, projectId, cwd: project.path, kind },
+        [created]: { paneId: created, projectId, cwd: cwd ?? project.path, kind },
       },
       focusedPane: { ...state.focusedPane, [projectId]: created },
     });

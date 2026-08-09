@@ -150,6 +150,8 @@ export default function PaneStage({ projectId, layout, active }: Props) {
           <div
             key={rect.paneId}
             className={`pane-slot${drag?.sourceId === rect.paneId ? " pane-slot-source" : ""}`}
+            // Lets a check address one particular pane on screen.
+            data-pane={rect.paneId}
             style={{
               left: `${rect.left}%`,
               top: `${rect.top}%`,

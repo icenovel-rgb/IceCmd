@@ -1,8 +1,9 @@
 [package]
 name = "icecmd"
-version = "0.3.0"
+version = "0.4.0"
 description = "Lightweight terminal project manager"
 authors = ["iceno"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

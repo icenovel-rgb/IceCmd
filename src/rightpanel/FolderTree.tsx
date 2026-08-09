@@ -1,16 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FsEntry } from "../types";
-import { openInFileManager, readDir } from "../terminal/ipc";
+import { openInFileManager, openPath, readDir, revealPath } from "../terminal/ipc";
+import { useWorkspace } from "../store/workspace";
+import ContextMenu from "../chrome/ContextMenu";
 
 interface Props {
+  projectId: string;
   rootPath: string;
 }
 
+interface Menu {
+  x: number;
+  y: number;
+  path: string;
+  isDir: boolean;
+}
+
 /** Children are fetched on expand and cached; nothing is watched, so idle cost is zero. */
-export default function FolderTree({ rootPath }: Props) {
+export default function FolderTree({ projectId, rootPath }: Props) {
   const [children, setChildren] = useState<Record<string, FsEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<Set<string>>(new Set());
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const openCli = useWorkspace((s) => s.openCli);
 
   const load = useCallback(async (path: string) => {
     try {
@@ -41,6 +54,23 @@ export default function FolderTree({ rootPath }: Props) {
     });
   };
 
+  const menuEntries = (target: Menu) =>
+    target.isDir
+      ? [
+          {
+            label: "탐색기에서 열기",
+            onSelect: () => void openInFileManager(target.path).catch(() => {}),
+          },
+          {
+            label: "여기서 cmd 열기",
+            onSelect: () => openCli(projectId, "shell", target.path),
+          },
+        ]
+      : [
+          { label: "열기", onSelect: () => void openPath(target.path).catch(() => {}) },
+          { label: "폴더에서 보기", onSelect: () => void revealPath(target.path).catch(() => {}) },
+        ];
+
   const renderLevel = (path: string, depth: number) => {
     const entries = children[path];
     if (failed.has(path)) {
@@ -56,12 +86,24 @@ export default function FolderTree({ rootPath }: Props) {
         <div key={childPath}>
           <div
             className={`tree-row${entry.isDir ? " tree-dir" : ""}`}
+            // The row carries its own path so a check never has to rebuild one
+            // from the label and depth, and get it wrong.
+            data-path={childPath}
             style={{ paddingLeft: 6 + depth * 12 }}
             onClick={() => entry.isDir && toggle(childPath)}
             // A folder row opens in Explorer on double-click; single click still
             // expands, so the two gestures do not fight.
             onDoubleClick={() => {
               if (entry.isDir) void openInFileManager(childPath).catch(() => {});
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setMenu({
+                x: event.clientX,
+                y: event.clientY,
+                path: childPath,
+                isDir: entry.isDir,
+              });
             }}
             title={entry.isDir ? "클릭: 펼치기 · 더블클릭: 탐색기에서 열기" : entry.name}
           >
@@ -84,7 +126,18 @@ export default function FolderTree({ rootPath }: Props) {
             title="탐색기에서 열기"
             onClick={() => void openInFileManager(rootPath).catch(() => {})}
           >
-            ⊞
+            {/* An open folder, not the grid glyph that used to sit here and read
+                as a "switch to grid view" button. */}
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3.1l1.2 1.4H12a1.5 1.5 0 0 1 1.5 1.5v.6h-9a1.5 1.5 0 0 0-1.45 1.1L1.5 12Z"
+              />
+              <path
+                fill="currentColor"
+                d="M4.55 7.1h10.2l-1.6 5.6a1.5 1.5 0 0 1-1.44 1.1H2.4a1.5 1.5 0 0 0 1.44-1.1Z"
+              />
+            </svg>
           </button>
           <button type="button" title="새로 읽기" onClick={() => void load(rootPath)}>
             ⟳
@@ -92,6 +145,10 @@ export default function FolderTree({ rootPath }: Props) {
         </span>
       </div>
       <div className="tree-body">{renderLevel(rootPath, 0)}</div>
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu} entries={menuEntries(menu)} />
+      )}
     </div>
   );
 }

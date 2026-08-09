@@ -20,6 +20,8 @@ pub fn run() {
             commands::log_line,
             commands::open_external,
             commands::open_in_file_manager,
+            commands::open_path,
+            commands::reveal_path,
             fs_tree::read_dir,
             fs_tree::path_info,
             persist::load_state,

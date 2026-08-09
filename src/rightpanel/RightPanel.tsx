@@ -30,7 +30,7 @@ export default function RightPanel() {
         <>
           <CliButtons projectId={activeProjectId} />
           {/* Remounting on project change resets the cached tree, which is what we want. */}
-          <FolderTree key={project.path} rootPath={project.path} />
+          <FolderTree key={project.path} projectId={activeProjectId} rootPath={project.path} />
         </>
       ) : (
         <p className="right-panel-empty">프로젝트를 추가하세요</p>

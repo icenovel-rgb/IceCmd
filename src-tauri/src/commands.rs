@@ -125,6 +125,87 @@ pub fn open_in_file_manager(path: String) -> Result<(), String> {
         .map_err(|e| format!("could not open folder: {e}"))
 }
 
+/// Opens a file with whatever the OS has registered for it.
+///
+/// Folders are refused on purpose — those belong to `open_in_file_manager`, so
+/// each command has exactly one meaning. The path arrives as a single argv entry
+/// and no shell is involved, so nothing can be smuggled in alongside it; what
+/// this can launch is the handler the user's own system chose for a file the
+/// user pointed at in their own project tree.
+#[tauri::command]
+pub fn open_path(path: String) -> Result<(), String> {
+    let target = std::path::Path::new(&path);
+    if !target.is_file() {
+        return Err(format!("not a file: {path}"));
+    }
+
+    #[cfg(windows)]
+    // explorer.exe hands a file to its registered handler, which keeps this on the
+    // same footing as open_in_file_manager: one program, one path argument.
+    let mut command = {
+        let mut c = std::process::Command::new("explorer.exe");
+        c.arg(target);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(target);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(target);
+        c
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not open file: {e}"))
+}
+
+/// Shows a file (or folder) in the file manager with it selected.
+#[tauri::command]
+pub fn reveal_path(path: String) -> Result<(), String> {
+    let target = std::path::Path::new(&path);
+    if !target.exists() {
+        return Err(format!("no such path: {path}"));
+    }
+
+    #[cfg(windows)]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        let mut c = std::process::Command::new("explorer.exe");
+        // explorer.exe parses its own raw command line instead of taking argv, and
+        // it only recognises `/select,` when the quotes sit around the path alone.
+        // Rust's normal quoting would wrap the whole `/select,<path>` token, which
+        // explorer then fails to read — visible only on paths containing a space.
+        c.raw_arg(format!("/select,\"{}\"", target.display()));
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.args(["-R".as_ref(), target.as_os_str()]);
+        c
+    };
+    // No portable "reveal" outside Windows and macOS; showing the parent folder is
+    // the closest honest equivalent.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(target.parent().unwrap_or(target));
+        c
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not reveal path: {e}"))
+}
+
 /// Hands a web link to the system browser.
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {

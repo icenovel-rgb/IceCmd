@@ -42,6 +42,17 @@ export default function App() {
       );
     });
 
+    /*
+     * Anywhere the app does not put up a menu of its own, WebView2 shows Edge's —
+     * "장치에 탭 내보내기" and friends, which belong to a browser, not to this app.
+     * Shift is left as an escape hatch so the DevTools element picker is still
+     * reachable while developing.
+     */
+    const blockNativeMenu = (event: MouseEvent) => {
+      if (!event.shiftKey) event.preventDefault();
+    };
+    window.addEventListener("contextmenu", blockNativeMenu);
+
     const harnessMode = import.meta.env.VITE_ICECMD_HARNESS;
     if (harnessMode) {
       void import("./devHarness").then((module) => module.runHarness(harnessMode));
@@ -53,6 +64,7 @@ export default function App() {
     return () => {
       stopStatusMonitor();
       stopAutoSave();
+      window.removeEventListener("contextmenu", blockNativeMenu);
       void exitListener.then((unlisten) => unlisten());
     };
   }, []);

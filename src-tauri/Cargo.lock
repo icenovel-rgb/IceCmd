@@ -1340,7 +1340,7 @@ dependencies = [
 
 [[package]]
 name = "icecmd"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "parking_lot",
  "portable-pty",

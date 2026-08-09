@@ -12,6 +12,7 @@
  *
  * The harness removes the projects it creates, leaving persisted state untouched.
  */
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { paneIds } from "./layout/tree";
 import { useWorkspace } from "./store/workspace";
 import {
@@ -19,11 +20,15 @@ import {
   logLine,
   openExternal,
   openInFileManager,
+  openPath,
+  revealPath,
   sessionAlive,
   writeSession,
 } from "./terminal/ipc";
 import { getEntry } from "./terminal/termRegistry";
 import { clearAttention } from "./terminal/status";
+import { dropTextFor } from "./terminal/dropText";
+import { handleDropPayload, type DroppedPath } from "./sidebar/dnd";
 import { checkForUpdate, currentVersion, isNewer } from "./update";
 
 const PATH_PLAIN = "D:\\dev\\IceCmd";
@@ -58,6 +63,58 @@ function screen(paneId: string): string {
 const layoutOf = (projectId: string) => useWorkspace.getState().layouts[projectId] ?? null;
 const panesOf = (projectId: string) => paneIds(layoutOf(projectId));
 
+/*
+ * Anything a user starts with the mouse is checked by dispatching the real
+ * events, not by calling the action it eventually reaches. Calling the store
+ * asserts the destination; only the events assert that the road to it is open.
+ */
+const rightClick = (element: HTMLElement) => {
+  // A real right-click delivers `pointerdown` before `contextmenu`, and an open
+  // menu dismisses itself on that pointerdown. Sending only `contextmenu` would
+  // skip the close-then-reopen that happens whenever the user right-clicks a
+  // second row — the case most likely to break.
+  element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 2 }));
+  // Cancellable, or the app's own `preventDefault` is a silent no-op and the
+  // check for it could never fail.
+  element.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 140,
+      clientY: 220,
+    }),
+  );
+};
+
+/** Presses a menu item the way a mouse does. See the context-menu section. */
+async function pressItem(item: HTMLElement): Promise<void> {
+  item.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  await sleep(120);
+  item.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+  item.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+}
+
+const projectRow = (path: string) =>
+  Array.from(document.querySelectorAll<HTMLElement>(".project-item")).find(
+    (row) => row.title === path,
+  ) ?? null;
+
+const menuItem = (label: string) =>
+  Array.from(document.querySelectorAll<HTMLButtonElement>(".context-menu button")).find(
+    (button) => (button.textContent ?? "").includes(label),
+  ) ?? null;
+
+/** The menu's items, in order — asserted whole so a stray item cannot hide. */
+const menuLabels = () =>
+  Array.from(document.querySelectorAll<HTMLButtonElement>(".context-menu button"))
+    .map((button) => (button.textContent ?? "").trim())
+    .join("|");
+
+const dismissMenu = async () => {
+  document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  await sleep(200);
+};
+
 /** Stores a value in the shell; only the same process can report it back. */
 const tagShell = (paneId: string) => writeSession(paneId, `set ICEVAR=${MARK}\r`);
 
@@ -73,6 +130,42 @@ async function shellIsSameProcess(paneId: string): Promise<boolean> {
   await sleep(1100);
   return screen(paneId).includes(`${token}=${MARK}`);
 }
+
+/**
+ * Runs a command in a live shell and returns the value it echoed back.
+ *
+ * Used to look at the real filesystem from inside the harness: the frontend can
+ * only reach the one state file the backend hands it, so questions *about* that
+ * file's neighbours have to be asked of something that can see the disk.
+ *
+ * The token is parked in a shell variable instead of being typed into the
+ * command. The console echoes every keystroke, so a command *containing* the
+ * token puts `TOKEN=…` on screen before the shell has answered anything, and the
+ * probe then reads back its own question — which is what happened: every state
+ * file measured `%~zA)`, the literal text of the command, and the checks built
+ * on it passed without measuring a thing.
+ */
+async function askShell(paneId: string, command: string): Promise<string> {
+  probeCounter += 1;
+  const token = `ASK${probeCounter}X${Math.floor(Math.random() * 1e6).toString(36)}`;
+  await writeSession(paneId, `set ICEPROBE=${token}\r`);
+  await sleep(300);
+  await writeSession(paneId, `${command.replace(/TOKEN/g, "%ICEPROBE%")}\r`);
+  await sleep(1300);
+  const answer = new RegExp(`${token}=(\\S*)`).exec(screen(paneId));
+  return answer?.[1] ?? "";
+}
+
+const STATE_DIR = "%APPDATA%\\com.icenovel.icecmd";
+
+/**
+ * Byte size of a file, or "0" when it does not exist.
+ *
+ * The space before each `)` keeps the closing paren from being glued onto the
+ * value that `echo` prints.
+ */
+const sizeProbe = (name: string) =>
+  `@if exist "${STATE_DIR}\\${name}" (@for %A in ("${STATE_DIR}\\${name}") do @echo TOKEN=%~zA ) else (@echo TOKEN=0 )`;
 
 /**
  * Two-launch persistence check. `persist1` leaves a split project behind on
@@ -196,6 +289,26 @@ export async function runHarness(mode = "1"): Promise<void> {
   }
   await logLine(`harness start mark=${MARK}`);
 
+  /*
+   * Wait for the store to be filled from disk before touching it.
+   *
+   * Hydration is async and starts in the same effect as this harness, so adding
+   * projects first means the restored state lands *on top of them* partway
+   * through the run. It shifted every pane count by one and took seven unrelated
+   * checks down with it. A project left behind by an interrupted run does the
+   * same, so the slate is wiped once hydration is in — the dev build has its own
+   * state file, and nothing here can reach the installed app's.
+   */
+  for (let i = 0; i < 100 && !useWorkspace.getState().hydrated; i += 1) await sleep(100);
+  check("the store hydrated before the run began", useWorkspace.getState().hydrated);
+  const leftover = useWorkspace.getState().projects;
+  if (leftover.length > 0) {
+    await logLine(`harness clearing ${leftover.length} project(s) left by an earlier run`);
+    for (const project of leftover) useWorkspace.getState().removeProject(project.id);
+    await sleep(1000);
+  }
+  check("the run starts with an empty workspace", useWorkspace.getState().projects.length === 0);
+
   // --- projects and their automatic terminal (R2, R3) ---
   const idPlain = useWorkspace.getState().addProject(PATH_PLAIN, "IceCmd");
   const idSpaces = useWorkspace.getState().addProject(PATH_SPACES, "IceCmd-MYBOX");
@@ -211,6 +324,9 @@ export async function runHarness(mode = "1"): Promise<void> {
   const paneSpaces = panesOf(idSpaces)[0];
   check("auto shell cwd (plain path)", screen(panePlain).includes("D:\\dev\\IceCmd"));
   check("auto shell cwd (path with spaces)", screen(paneSpaces).includes("Naver MYBOX"));
+
+  // Noted before this run writes anything, to be compared at the end.
+  const installedStateBefore = await askShell(panePlain, sizeProbe("state.json"));
 
   // --- CLI availability, without actually starting the CLIs ---
   await writeSession(paneSpaces, "where claude\r");
@@ -411,6 +527,29 @@ export async function runHarness(mode = "1"): Promise<void> {
   useWorkspace.getState().setFontSize(13);
   useWorkspace.getState().setUiScale(1);
 
+  /*
+   * --- the dev build must not touch the installed app's state ---
+   *
+   * They share a config directory, so before the filenames were split, a harness run
+   * that cleared state.json also cleared the projects registered in the installed
+   * app. That is data loss caused by a test, and it happened for real (2026-08-09).
+   */
+  const devState = await askShell(panePlain, sizeProbe("state.dev.json"));
+  // Asserted before anything is concluded from it: a probe that cannot fail is
+  // worth nothing, and this one silently answered with its own command text once.
+  check("the disk probe answers with a byte count", /^\d+$/.test(devState), `answer=${devState}`);
+  check("dev build writes its own state file", devState !== "0", `state.dev.json=${devState}B`);
+
+  const installedStateAfter = await askShell(panePlain, sizeProbe("state.json"));
+  check(
+    "installed app's state.json untouched by this run",
+    /^\d+$/.test(installedStateAfter) && installedStateAfter === installedStateBefore,
+    `before=${installedStateBefore}B after=${installedStateAfter}B`,
+  );
+
+  const backup = await askShell(panePlain, sizeProbe("state.dev.json.bak"));
+  check("a one-generation backup is kept", /^[1-9]\d*$/.test(backup), `bak=${backup}B`);
+
   // --- update check: version comparison is where this silently goes wrong ---
   check("version compare: 0.2.0 > 0.1.0", isNewer("0.2.0", "0.1.0"));
   check("version compare: 0.10.0 > 0.9.0 (not a string compare)", isNewer("0.10.0", "0.9.0"));
@@ -510,6 +649,281 @@ export async function runHarness(mode = "1"): Promise<void> {
   check("looking at the project clears attention", cleared !== "attention", `status=${cleared}`);
   useWorkspace.getState().setActiveProject(idPlain);
 
+  /*
+   * --- the context menu, pressed the way a hand presses it ---
+   *
+   * Every item in this menu was dead from 0.1.0 through 0.3.0 while 59 checks
+   * reported PASS, because the checks called `removeProject()` and never opened
+   * the menu. The press below is split into pointerdown and click on purpose:
+   * dispatching `click` alone passes even with the bug present, since the bug is
+   * that the button is unmounted between the two.
+   */
+  const spacesRow = projectRow(PATH_SPACES);
+  check("the project row is reachable in the sidebar", Boolean(spacesRow));
+  if (spacesRow) {
+    rightClick(spacesRow);
+    await sleep(300);
+    check("right-click opens the project menu", Boolean(document.querySelector(".context-menu")));
+    // Not pressed: it would throw an Explorer window over the app mid-run. The
+    // press path it shares with the item below is what was broken.
+    check("the menu offers open-in-Explorer", Boolean(menuItem("탐색기에서 열기")));
+
+    const remove = menuItem("제거");
+    check("the menu offers remove", Boolean(remove));
+    if (remove) {
+      remove.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      await sleep(150);
+      check("pressing an item does not dismiss the menu first", document.body.contains(remove));
+
+      remove.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+      remove.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(900);
+      check(
+        "the pressed item really removes the project",
+        !useWorkspace.getState().projects.some((project) => project.id === idSpaces),
+        `projects=${useWorkspace.getState().projects.length}`,
+      );
+      check("the menu closes once the item ran", !document.querySelector(".context-menu"));
+    }
+  }
+
+  const plainRow = projectRow(PATH_PLAIN);
+  check("the remaining project row is still there", Boolean(plainRow));
+  if (plainRow) {
+    rightClick(plainRow);
+    await sleep(400);
+    check(
+      "the menu opens again on another row",
+      Boolean(document.querySelector(".context-menu")),
+      `menus=${document.querySelectorAll(".context-menu").length} rows=${
+        document.querySelectorAll(".project-item").length
+      } attached=${document.body.contains(plainRow)}`,
+    );
+    await dismissMenu();
+    check("a press outside dismisses the menu", !document.querySelector(".context-menu"));
+  }
+
+  // --- the same menu, now in the folder tree ---
+  const treeRows = () => Array.from(document.querySelectorAll<HTMLElement>(".tree-row"));
+  const folderRow = treeRows().find((row) => row.classList.contains("tree-dir")) ?? null;
+  const fileRow = treeRows().find((row) => !row.classList.contains("tree-dir")) ?? null;
+  check("the folder tree has both a folder and a file to press", Boolean(folderRow && fileRow));
+  await logLine(
+    `harness tree rows=${treeRows().length} first=${treeRows()
+      .slice(0, 6)
+      .map((row) => `${row.dataset.path ?? "?"}${row.classList.contains("tree-dir") ? "/" : ""}`)
+      .join(" ")}`,
+  );
+
+  check(
+    "the folder header icon is drawn, not a glyph",
+    Boolean(document.querySelector('.tree-header-actions button[title="탐색기에서 열기"] svg')),
+  );
+
+  if (fileRow) {
+    rightClick(fileRow);
+    await sleep(300);
+    // Neither item is pressed: one hands the file to whatever program owns it,
+    // the other throws an Explorer window over the app mid-run.
+    check("a file offers open and reveal", menuLabels() === "열기|폴더에서 보기", menuLabels());
+    await dismissMenu();
+  }
+
+  if (folderRow) {
+    const folderPath = folderRow.dataset.path ?? "";
+    rightClick(folderRow);
+    await sleep(300);
+    check(
+      "a folder offers Explorer and a shell",
+      menuLabels() === "탐색기에서 열기|여기서 cmd 열기",
+      menuLabels(),
+    );
+
+    const here = menuItem("여기서 cmd 열기");
+    check("the folder menu has the shell item", Boolean(here));
+    if (here) {
+      const before = panesOf(idPlain);
+      await pressItem(here);
+      await sleep(3000);
+      const after = panesOf(idPlain);
+      const created = after.find((id) => !before.includes(id)) ?? "";
+      check(
+        "opening a shell here adds a pane",
+        after.length === before.length + 1,
+        `${before.length} -> ${after.length}`,
+      );
+      check(
+        "the new pane is told to start in the folder that was pressed",
+        useWorkspace.getState().panes[created]?.cwd === folderPath,
+        `cwd=${useWorkspace.getState().panes[created]?.cwd ?? "none"} want=${folderPath}`,
+      );
+      // The store holding the right cwd proves nothing about the process; ask the
+      // shell where it actually landed.
+      check(
+        "the shell really started in that folder",
+        screen(created).includes(folderPath),
+        `want=${folderPath}`,
+      );
+      if (created) useWorkspace.getState().closePane(created);
+      await sleep(800);
+    }
+  }
+
+  /*
+   * --- dropping files on a pane types their paths ---
+   *
+   * Tauri swallows OS drags before the webview sees them, so there is no DOM
+   * event to dispatch; the payload handler is driven directly, built from the
+   * pane's real rectangle and the real device pixel ratio (drop coordinates
+   * arrive in physical pixels, and getting that conversion wrong would put every
+   * drop in the wrong pane). Tauri's own delivery of the event is the one link
+   * this cannot reach.
+   */
+  check("quoting: a plain path is left alone", dropTextFor([PATH_PLAIN]) === PATH_PLAIN);
+  check(
+    "quoting: a path with spaces is quoted",
+    dropTextFor([PATH_SPACES]) === `"${PATH_SPACES}"`,
+    dropTextFor([PATH_SPACES]),
+  );
+  check(
+    "quoting: several paths are separated",
+    dropTextFor([PATH_PLAIN, PATH_SPACES]) === `${PATH_PLAIN} "${PATH_SPACES}"`,
+  );
+
+  const host = document.querySelector<HTMLElement>(`[data-pane="${panePlain}"] .terminal-host`);
+  check("the pane can be found on screen", Boolean(host));
+  if (host) {
+    const box = host.getBoundingClientRect();
+    const scale = window.devicePixelRatio || 1;
+    const inside = { x: (box.left + box.width / 2) * scale, y: (box.top + box.height / 2) * scale };
+    const outside = { x: -50, y: -50 };
+    const dropped = `${PATH_SPACES}\\README.md`;
+
+    let hovered: boolean | null = null;
+    const target = {
+      element: () => host,
+      onHover: (state: boolean) => {
+        hovered = state;
+      },
+      onDrop: (paths: DroppedPath[]) =>
+        void writeSession(panePlain, dropTextFor(paths.map((entry) => entry.path))),
+    };
+
+    await handleDropPayload({ type: "over", position: inside }, target);
+    check("a drag over the pane marks it as the target", hovered === true);
+    await handleDropPayload({ type: "over", position: outside }, target);
+    check("a drag outside it does not", hovered === false);
+
+    await handleDropPayload({ type: "drop", paths: [dropped], position: outside }, target);
+    await sleep(700);
+    check(
+      "a drop outside the pane types nothing",
+      !screen(panePlain).includes("README.md"),
+      "text arrived from a drop that missed",
+    );
+
+    await handleDropPayload({ type: "drop", paths: [dropped], position: inside }, target);
+    await sleep(900);
+    check(
+      "a drop on the pane types the path, quoted",
+      screen(panePlain).includes(`"${dropped}"`),
+      `want="${dropped}"`,
+    );
+    // Nothing was executed and nothing should be: clear the line the drop typed.
+    await writeSession(panePlain, "\x1b");
+    await sleep(500);
+  }
+
+  /*
+   * --- the pane's own copy/paste menu ---
+   *
+   * "붙여넣기" is never pressed here: it would push whatever the user has copied
+   * into a live shell, and a trailing newline in it would run as a command.
+   */
+  if (host) {
+    rightClick(host);
+    await sleep(300);
+    check("a terminal with no selection offers paste only", menuLabels() === "붙여넣기", menuLabels());
+    await dismissMenu();
+
+    getEntry(panePlain)?.term.selectAll();
+    rightClick(host);
+    await sleep(300);
+    check("a selection adds copy to the menu", menuLabels() === "복사|붙여넣기", menuLabels());
+
+    /*
+     * The Clipboard API refuses to run while the document is unfocused, and
+     * Windows will not bring a window forward on behalf of a background process,
+     * which is how this run is started. So the round trip is checked only when
+     * focus was actually obtained, and otherwise reported as skipped — never
+     * quietly passed. Click the window and run again to cover it.
+     */
+    const focused = await getCurrentWindow()
+      .setFocus()
+      .then(() => sleep(700))
+      .then(() => document.hasFocus())
+      .catch(() => false);
+
+    const copyItem = menuItem("복사");
+    check("the menu has the copy item", Boolean(copyItem));
+
+    const savedClipboard = focused ? await navigator.clipboard.readText().catch(() => null) : null;
+    if (copyItem) {
+      await pressItem(copyItem);
+      await sleep(600);
+      // True whether or not the clipboard is reachable: it says the press ran.
+      check("the copy item runs and closes the menu", !document.querySelector(".context-menu"));
+
+      if (focused) {
+        const copied = await navigator.clipboard.readText().catch(() => "");
+        check(
+          "the copy item puts the selection on the clipboard",
+          copied.includes(MARK),
+          `${copied.length} chars`,
+        );
+        // The clipboard belongs to whoever is at the keyboard, so it goes back.
+        if (savedClipboard !== null) {
+          await navigator.clipboard.writeText(savedClipboard).catch(() => {});
+        }
+      } else {
+        await logLine(
+          "harness SKIP copy reaches the clipboard — the window could not take focus, " +
+            "and the Clipboard API refuses to run unfocused",
+        );
+      }
+    }
+    getEntry(panePlain)?.term.clearSelection();
+    await dismissMenu();
+  }
+
+  /*
+   * --- the browser's own menu must never surface ---
+   *
+   * Without this, right-clicking anywhere the app has no menu of its own brings up
+   * Edge's ("장치에 탭 내보내기"), which belongs to a browser, not to this app.
+   */
+  const plainMenu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+  document.body.dispatchEvent(plainMenu);
+  check("right-click never reaches the WebView2 menu", plainMenu.defaultPrevented);
+
+  const shiftMenu = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    shiftKey: true,
+  });
+  document.body.dispatchEvent(shiftMenu);
+  check("Shift+right-click is still let through for DevTools", !shiftMenu.defaultPrevented);
+
+  // --- the two new path commands refuse what they are not for ---
+  const openFolderRejected = await openPath(PATH_PLAIN)
+    .then(() => false)
+    .catch(() => true);
+  check("open_path refuses a folder", openFolderRejected);
+  const revealMissingRejected = await revealPath(`${PATH_PLAIN}\\__no_such_file__`)
+    .then(() => false)
+    .catch(() => true);
+  check("reveal_path refuses a missing path", revealMissingRejected);
+
   // --- cleanup, so the user's saved state stays clean ---
   useWorkspace.getState().removeProject(idPlain);
   useWorkspace.getState().removeProject(idSpaces);
@@ -519,6 +933,20 @@ export async function runHarness(mode = "1"): Promise<void> {
     [panePlain, paneSpaces].map((id) => sessionAlive(id).catch(() => false)),
   );
   check("removed projects leave no live sessions", leftovers.every((alive) => !alive));
+
+  /*
+   * Left for last because it throws an Explorer window over everything. It is the
+   * one case that matters: explorer.exe reads its own raw command line, so
+   * `/select,` only works with the quotes around the path alone, and normal argv
+   * quoting fails on exactly the paths that have a space in them.
+   *
+   * That the window highlights the file is the one thing here a person still has
+   * to look at — this can only assert that the command was accepted.
+   */
+  const revealedWithSpaces = await revealPath(`${PATH_SPACES}\\README.md`)
+    .then(() => true)
+    .catch(() => false);
+  check("reveal_path accepts a path with spaces", revealedWithSpaces);
 
   await logLine(
     `harness done passed=${passed} failed=${failed} verdict=${failed === 0 ? "PASS" : "FAIL"}`,

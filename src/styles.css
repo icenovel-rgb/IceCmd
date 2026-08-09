@@ -193,6 +193,13 @@ button:disabled {
   background: var(--accent-soft);
 }
 
+/* Says which pane a dragged file will land in. Drawn inside the edge so it
+   cannot change the terminal's size and force a ConPTY repaint mid-drag. */
+.terminal-host.drop-active {
+  outline: 2px dashed var(--accent-hi);
+  outline-offset: -2px;
+}
+
 .sidebar-empty {
   margin: 24px 12px;
   color: var(--hint);
@@ -843,7 +850,14 @@ button:disabled {
 }
 
 .tree-header button {
-  padding: 1px 7px;
+  /* One holds an SVG and one a glyph; centring both keeps the pair the same size,
+     which inline layout would not — the icon would sit on a text baseline. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 20px;
+  padding: 1px 6px;
   font-size: 12px;
   color: var(--muted);
   background: transparent;

@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useWorkspace } from "../store/workspace";
 import { paneIds } from "../layout/tree";
 import { clearAttention } from "../terminal/status";
 import { openInFileManager } from "../terminal/ipc";
+import ContextMenu from "../chrome/ContextMenu";
 import ProjectItem from "./ProjectItem";
-import { listenForFolderDrop } from "./dnd";
+import { listenForPathDrop } from "./dnd";
 import UpdateBanner from "./UpdateBanner";
 
 interface Menu {
@@ -27,27 +27,23 @@ export default function Sidebar() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const [menu, setMenu] = useState<Menu | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   useEffect(() => {
-    const pending = listenForFolderDrop({
+    const pending = listenForPathDrop({
       element: () => listRef.current,
       onHover: setDropActive,
-      onDrop: (folders) => {
-        for (const folder of folders) addProject(folder.path, folder.name);
+      // Files are ignored here: only a directory can become a project.
+      onDrop: (dropped) => {
+        for (const entry of dropped) {
+          if (entry.isDir) addProject(entry.path, entry.name);
+        }
       },
     });
     return () => {
       void pending.then((unlisten) => unlisten());
     };
   }, [addProject]);
-
-  // Any click elsewhere dismisses the context menu.
-  useEffect(() => {
-    if (!menu) return;
-    const dismiss = () => setMenu(null);
-    window.addEventListener("pointerdown", dismiss, { once: true });
-    return () => window.removeEventListener("pointerdown", dismiss);
-  }, [menu]);
 
   const select = (projectId: string) => {
     setActiveProject(projectId);
@@ -91,37 +87,27 @@ export default function Sidebar() {
 
       <UpdateBanner />
 
-      {/*
-        Rendered on <body>: the sidebar carries the UI-scale zoom, and a fixed
-        element inside a zoomed ancestor gets its coordinates scaled too, which
-        would place the menu away from the pointer.
-      */}
-      {menu &&
-        createPortal(
-          <div className="context-menu" style={{ left: menu.x, top: menu.y }}>
-            <button
-              type="button"
-              onClick={() => {
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={closeMenu}
+          entries={[
+            {
+              label: "탐색기에서 열기",
+              onSelect: () => {
                 const target = projects.find((p) => p.id === menu.projectId);
                 if (target) void openInFileManager(target.path).catch(() => {});
-                setMenu(null);
-              }}
-            >
-              탐색기에서 열기
-            </button>
-            <button
-              type="button"
-              className="context-danger"
-              onClick={() => {
-                removeProject(menu.projectId);
-                setMenu(null);
-              }}
-            >
-              프로젝트 제거
-            </button>
-          </div>,
-          document.body,
-        )}
+              },
+            },
+            {
+              label: "프로젝트 제거",
+              danger: true,
+              onSelect: () => removeProject(menu.projectId),
+            },
+          ]}
+        />
+      )}
     </aside>
   );
 }

@@ -68,3 +68,9 @@ export const openExternal = (url: string) => invoke<void>("open_external", { url
 /** Opens a folder in Explorer / Finder / the desktop file manager. */
 export const openInFileManager = (path: string) =>
   invoke<void>("open_in_file_manager", { path });
+
+/** Opens a file with the program the OS has registered for it. */
+export const openPath = (path: string) => invoke<void>("open_path", { path });
+
+/** Shows a file in the file manager with it selected. */
+export const revealPath = (path: string) => invoke<void>("reveal_path", { path });
