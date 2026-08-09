@@ -10,6 +10,7 @@ import {
   UI_LIMITS,
   useWorkspace,
   type PaneMeta,
+  type SavedSizes,
   type UiPrefs,
   type WorkspaceSnapshot,
 } from "./workspace";
@@ -24,6 +25,7 @@ interface Stored {
   panes: Record<string, PaneMeta>;
   activeProjectId: string | null;
   ui?: UiPrefs;
+  mySizes?: SavedSizes | null;
 }
 
 /** Older state files predate `ui`, and a hand-edited one may hold nonsense. */
@@ -62,6 +64,21 @@ function isPaneNode(value: unknown): value is PaneNode {
     );
   }
   return false;
+}
+
+/** The saved pair is user-editable on disk, so it is re-validated like any input. */
+function readMySizes(stored: SavedSizes | null | undefined): SavedSizes | null {
+  if (!stored) return null;
+  const { fontSize, uiScale } = stored;
+  if (!Number.isFinite(fontSize) || !Number.isFinite(uiScale)) return null;
+  return {
+    fontSize: Math.round(
+      Math.min(UI_LIMITS.fontSize.max, Math.max(UI_LIMITS.fontSize.min, fontSize)),
+    ),
+    uiScale:
+      Math.round(Math.min(UI_LIMITS.uiScale.max, Math.max(UI_LIMITS.uiScale.min, uiScale)) * 100) /
+      100,
+  };
 }
 
 export async function hydrate(): Promise<void> {
@@ -131,6 +148,7 @@ export async function hydrate(): Promise<void> {
     panes,
     activeProjectId,
     ui: readUi(parsed.ui),
+    mySizes: readMySizes(parsed.mySizes),
   };
   useWorkspace.getState().replaceAll(snapshot);
 }
@@ -147,7 +165,8 @@ export function startAutoSave(): () => void {
       state.layouts === previous.layouts &&
       state.panes === previous.panes &&
       state.activeProjectId === previous.activeProjectId &&
-      state.ui === previous.ui;
+      state.ui === previous.ui &&
+      state.mySizes === previous.mySizes;
     if (unchanged) return;
 
     if (timer !== null) window.clearTimeout(timer);
@@ -161,6 +180,7 @@ export function startAutoSave(): () => void {
         panes: current.panes,
         activeProjectId: current.activeProjectId,
         ui: current.ui,
+        mySizes: current.mySizes,
       };
       void saveState(JSON.stringify(stored)).catch(() => {});
     }, SAVE_DEBOUNCE_MS);

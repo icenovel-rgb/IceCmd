@@ -65,6 +65,14 @@ export default function ScaleControl() {
   const setUiScale = useWorkspace((s) => s.setUiScale);
   const nudgeUiScale = useWorkspace((s) => s.nudgeUiScale);
 
+  const mySizes = useWorkspace((s) => s.mySizes);
+  const saveMySizes = useWorkspace((s) => s.saveMySizes);
+  const applyMySizes = useWorkspace((s) => s.applyMySizes);
+  const clearMySizes = useWorkspace((s) => s.clearMySizes);
+
+  const atMySizes =
+    mySizes !== null && mySizes.fontSize === fontSize && mySizes.uiScale === uiScale;
+
   return (
     <div className="scale-control">
       <ScaleRow
@@ -99,6 +107,45 @@ export default function ScaleControl() {
           onChange: setFontSize,
         }}
       />
+
+      {/* 두 값을 한 쌍으로 기억한다. 배율만 맞고 글자만 어긋난 상태는 쓸모가 없다. */}
+      <div className="mysize-row">
+        <button
+          type="button"
+          className="mysize-save"
+          title={
+            mySizes
+              ? `현재 값으로 덮어쓰기 (지금 저장된 값: ${Math.round(mySizes.uiScale * 100)}% · ${mySizes.fontSize}px)`
+              : "지금 값을 내 설정으로 기억"
+          }
+          onClick={saveMySizes}
+        >
+          {mySizes ? "내 설정 덮어쓰기" : "내 설정으로 저장"}
+        </button>
+        <button
+          type="button"
+          className="mysize-apply"
+          disabled={!mySizes || atMySizes}
+          title={
+            mySizes
+              ? `내 설정으로 되돌리기 — ${Math.round(mySizes.uiScale * 100)}% · ${mySizes.fontSize}px`
+              : "저장된 설정이 없습니다"
+          }
+          onClick={applyMySizes}
+        >
+          {atMySizes ? "내 설정 적용됨" : "내 설정 적용"}
+        </button>
+        {mySizes && (
+          <button
+            type="button"
+            className="mysize-clear"
+            title="저장된 내 설정 지우기"
+            onClick={clearMySizes}
+          >
+            ✕
+          </button>
+        )}
+      </div>
     </div>
   );
 }

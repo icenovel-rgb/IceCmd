@@ -29,6 +29,16 @@ export interface UiPrefs {
   uiScale: number;
 }
 
+/**
+ * The user's own remembered pair, distinct from the factory default.
+ * Sliders get nudged all day; this is the "put it back the way I like it" anchor,
+ * which the 100% / 13px default is not.
+ */
+export interface SavedSizes {
+  fontSize: number;
+  uiScale: number;
+}
+
 export const UI_LIMITS = {
   sidebar: { min: 140, max: 460 },
   rightPanel: { min: 180, max: 520 },
@@ -68,6 +78,8 @@ interface WorkspaceState {
   focusedPane: Record<string, string | undefined>;
   status: Record<string, PaneStatus>;
   ui: UiPrefs;
+  /** null until the user saves one. */
+  mySizes: SavedSizes | null;
   hydrated: boolean;
 
   addProject: (path: string, name: string) => string | null;
@@ -89,6 +101,9 @@ interface WorkspaceState {
   nudgeFontSize: (delta: number) => void;
   setUiScale: (scale: number) => void;
   nudgeUiScale: (delta: number) => void;
+  saveMySizes: () => void;
+  applyMySizes: () => void;
+  clearMySizes: () => void;
   replaceAll: (snapshot: WorkspaceSnapshot) => void;
 }
 
@@ -98,6 +113,7 @@ export interface WorkspaceSnapshot {
   panes: Record<string, PaneMeta>;
   activeProjectId: string | null;
   ui: UiPrefs;
+  mySizes: SavedSizes | null;
 }
 
 const newPaneId = () => `pane-${crypto.randomUUID()}`;
@@ -113,6 +129,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   focusedPane: {},
   status: {},
   ui: DEFAULT_UI,
+  mySizes: null,
   hydrated: false,
 
   addProject: (path, name) => {
@@ -284,6 +301,27 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   nudgeUiScale: (delta) =>
     set((state) => ({ ui: { ...state.ui, uiScale: clampScale(state.ui.uiScale + delta) } })),
 
+  saveMySizes: () =>
+    set((state) => ({
+      mySizes: { fontSize: state.ui.fontSize, uiScale: state.ui.uiScale },
+    })),
+
+  applyMySizes: () =>
+    set((state) =>
+      state.mySizes
+        ? {
+            ui: {
+              ...state.ui,
+              // Re-clamp on the way in: a hand-edited state file could hold anything.
+              fontSize: clampTo(state.mySizes.fontSize, UI_LIMITS.fontSize),
+              uiScale: clampScale(state.mySizes.uiScale),
+            },
+          }
+        : state,
+    ),
+
+  clearMySizes: () => set({ mySizes: null }),
+
   replaceAll: (snapshot) =>
     set({
       projects: snapshot.projects,
@@ -291,6 +329,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       panes: snapshot.panes,
       activeProjectId: snapshot.activeProjectId,
       ui: snapshot.ui,
+      mySizes: snapshot.mySizes,
       focusedPane: {},
       status: {},
       hydrated: true,

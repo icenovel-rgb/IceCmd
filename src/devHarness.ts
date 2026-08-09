@@ -15,6 +15,7 @@
 import { paneIds } from "./layout/tree";
 import { useWorkspace } from "./store/workspace";
 import {
+  loadState,
   logLine,
   openExternal,
   openInFileManager,
@@ -23,6 +24,7 @@ import {
 } from "./terminal/ipc";
 import { getEntry } from "./terminal/termRegistry";
 import { clearAttention } from "./terminal/status";
+import { checkForUpdate, currentVersion, isNewer } from "./update";
 
 const PATH_PLAIN = "D:\\dev\\IceCmd";
 const PATH_SPACES = "D:\\Naver MYBOX\\2. Works\\Personal\\IceCmd";
@@ -362,6 +364,77 @@ export async function runHarness(mode = "1"): Promise<void> {
     .then(() => false)
     .catch(() => true);
   check("open_in_file_manager refuses a missing path", missingRejected);
+
+  // --- my saved sizes: a remembered pair, distinct from the factory default ---
+  useWorkspace.getState().setFontSize(19);
+  useWorkspace.getState().setUiScale(1.25);
+  useWorkspace.getState().saveMySizes();
+  await sleep(400);
+  const saved = useWorkspace.getState().mySizes;
+  check("saveMySizes remembers both values", saved?.fontSize === 19 && saved?.uiScale === 1.25,
+    `saved=${JSON.stringify(saved)}`);
+
+  useWorkspace.getState().setFontSize(11);
+  useWorkspace.getState().setUiScale(0.9);
+  await sleep(300);
+  useWorkspace.getState().applyMySizes();
+  await sleep(400);
+  const restored = useWorkspace.getState().ui;
+  check(
+    "applyMySizes puts both values back",
+    restored.fontSize === 19 && restored.uiScale === 1.25,
+    `now=${restored.fontSize}px ${restored.uiScale}`,
+  );
+  check(
+    "terminals follow the restored font size",
+    getEntry(panePlain)?.term.options.fontSize === 19,
+    `term=${getEntry(panePlain)?.term.options.fontSize}`,
+  );
+  check(
+    "apply button reports it is already applied",
+    Boolean(document.querySelector(".mysize-apply:disabled")),
+  );
+  // The saved pair must reach disk, or it is not a setting — it is a session quirk.
+  await sleep(900);
+  const onDisk = await loadState()
+    .then((raw) => (raw ? (JSON.parse(raw) as { mySizes?: { fontSize: number } }) : null))
+    .catch(() => null);
+  check(
+    "saved sizes are written to state.json",
+    onDisk?.mySizes?.fontSize === 19,
+    `disk=${JSON.stringify(onDisk?.mySizes)}`,
+  );
+
+  useWorkspace.getState().clearMySizes();
+  await sleep(300);
+  check("clearMySizes forgets it", useWorkspace.getState().mySizes === null);
+  useWorkspace.getState().setFontSize(13);
+  useWorkspace.getState().setUiScale(1);
+
+  // --- update check: version comparison is where this silently goes wrong ---
+  check("version compare: 0.2.0 > 0.1.0", isNewer("0.2.0", "0.1.0"));
+  check("version compare: 0.10.0 > 0.9.0 (not a string compare)", isNewer("0.10.0", "0.9.0"));
+  check("version compare: v-prefix tolerated", isNewer("v1.0.0", "0.9.9"));
+  check("version compare: same version is not newer", !isNewer("0.2.0", "0.2.0"));
+  check("version compare: older is not newer", !isNewer("0.1.9", "0.2.0"));
+  check(
+    "running version is baked in",
+    /^\d+\.\d+\.\d+$/.test(currentVersion),
+    `version=${currentVersion}`,
+  );
+  // The live source must be readable and must agree with what shipped.
+  const liveCheck = await checkForUpdate()
+    .then((info) => ({ ok: true, info }))
+    .catch(() => ({ ok: false, info: null }));
+  check(
+    "update source reachable",
+    liveCheck.ok,
+    liveCheck.info ? `offers ${liveCheck.info.version}` : "no newer version",
+  );
+  check(
+    "footer shows either a version line or an update banner",
+    Boolean(document.querySelector(".version-line, .update-banner")),
+  );
 
   // --- status rollup (R5) ---
   await writeSession(panePlain, `echo ${MARK}-status\r`);

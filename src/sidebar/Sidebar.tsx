@@ -6,6 +6,7 @@ import { clearAttention } from "../terminal/status";
 import { openInFileManager } from "../terminal/ipc";
 import ProjectItem from "./ProjectItem";
 import { listenForFolderDrop } from "./dnd";
+import UpdateBanner from "./UpdateBanner";
 
 interface Menu {
   projectId: string;
@@ -87,6 +88,8 @@ export default function Sidebar() {
           </p>
         )}
       </div>
+
+      <UpdateBanner />
 
       {/*
         Rendered on <body>: the sidebar carries the UI-scale zoom, and a fixed
