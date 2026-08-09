@@ -43,15 +43,29 @@ git push --follow-tags
 ```
 
 태그가 올라가면 `.github/workflows/release.yml`이 Windows 설치 파일을 빌드해 그 태그의 릴리스에
-붙인다. 버전이 붙은 파일과 함께 **버전 무관 사본**(`IceCmd-Setup-x64.exe`)도 올리므로,
-배포 페이지는 아래 주소만 걸어두면 항상 최신을 가리킨다.
+붙인다. 워크플로는 빌드 전에 `bump-version.mjs --check <태그>`로 **태그와 소스 버전이 일치하는지
+확인**하고, 어긋나면 릴리스를 만들지 않는다.
+
+이어서 배포 페이지(icenovel.com)의 다운로드 카드를 갱신한다.
+
+```bash
+python scripts/make-latest-json.py --write     # GitHub 릴리스에서 뽑아 사이트 소스에 기록
+cd "D:/Naver MYBOX/11. Business/icenovel.com/web/.deploy"
+python deploy.py plan
+python deploy.py push --approved-by "<실제 지시>"
+```
+
+카드가 가리키는 주소는 **태그 고정 URL**이다(`releases/download/v0.1.0/...`).
+`releases/latest/...` 를 쓰면 카드에 적힌 버전·크기와 실제로 내려가는 파일이 어긋날 수 있다 —
+카드가 0.1.0이라고 적어두고 0.3.0을 내려주는 상황을 막기 위해 고정 URL을 쓴다.
+그래서 릴리스를 낼 때마다 위 두 단계를 같이 밟는다.
+
+버전 무관 사본(`IceCmd-Setup-x64.exe`)도 함께 올라가므로, 버전 표기가 필요 없는 곳
+(README 배지, 블로그 링크 등)에서는 아래 주소를 쓸 수 있다.
 
 ```
 https://github.com/icenovel-rgb/IceCmd/releases/latest/download/IceCmd-Setup-x64.exe
 ```
-
-워크플로는 빌드 전에 `bump-version.mjs --check <태그>`로 **태그와 소스 버전이 일치하는지 확인**하고,
-어긋나면 릴리스를 만들지 않는다.
 
 ### 창을 보지 않고 검증하기
 
