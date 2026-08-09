@@ -8,7 +8,13 @@ const host = process.env.TAURI_DEV_HOST;
 // The running version is baked in at build time rather than fetched over IPC:
 // it needs no Tauri permission and cannot disagree with what was shipped.
 // scripts/bump-version.mjs keeps this in step with tauri.conf.json and Cargo.toml.
-const appVersion = JSON.parse(readFileSync("./package.json", "utf8")).version as string;
+// ICECMD_FAKE_VERSION lets the harness pretend to be an older build, which is the
+// only way to exercise the "a newer version exists" path without waiting for the
+// next release. Never set in a real build.
+const appVersion =
+  // @ts-expect-error process is a nodejs global
+  (process.env.ICECMD_FAKE_VERSION as string | undefined) ||
+  (JSON.parse(readFileSync("./package.json", "utf8")).version as string);
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({

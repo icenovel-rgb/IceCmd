@@ -422,15 +422,66 @@ export async function runHarness(mode = "1"): Promise<void> {
     /^\d+\.\d+\.\d+$/.test(currentVersion),
     `version=${currentVersion}`,
   );
-  // The live source must be readable and must agree with what shipped.
-  const liveCheck = await checkForUpdate()
-    .then((info) => ({ ok: true, info }))
-    .catch(() => ({ ok: false, info: null }));
+  /*
+   * The live sources are fetched here, not through `checkForUpdate`, because that
+   * function swallows its own failures by design — asserting on it would pass while
+   * offline. The webview's origin is `tauri.localhost`, so a source that answers 200
+   * to curl can still be withheld from the app by CORS: a failure invisible in any
+   * server log. Both sources are probed from inside the running webview.
+   */
+  const probe = (url: string) =>
+    fetch(url, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("http"))))
+      .then((payload) => payload as Record<string, unknown>)
+      .catch(() => null);
+
+  const site = await probe("https://icenovel.com/download/icecmd/latest.json");
+  const siteVersion = (site?.win as { version?: string } | undefined)?.version;
   check(
-    "update source reachable",
-    liveCheck.ok,
-    liveCheck.info ? `offers ${liveCheck.info.version}` : "no newer version",
+    "site latest.json readable from the webview (CORS)",
+    typeof siteVersion === "string",
+    siteVersion ? `site=${siteVersion}` : "blocked or unreachable",
   );
+  check(
+    "site version is not behind what shipped",
+    typeof siteVersion === "string" && !isNewer(currentVersion, siteVersion),
+    `site=${siteVersion ?? "?"} running=${currentVersion}`,
+  );
+
+  const gh = await probe("https://api.github.com/repos/icenovel-rgb/IceCmd/releases/latest");
+  check(
+    "github fallback readable from the webview",
+    typeof (gh as { tag_name?: string } | null)?.tag_name === "string",
+    `tag=${(gh as { tag_name?: string } | null)?.tag_name ?? "?"}`,
+  );
+
+  /*
+   * Which answer is correct depends on reality, so the check follows reality rather
+   * than a hard-coded expectation. Run with ICECMD_FAKE_VERSION=0.1.0 to take the
+   * "a newer version exists" branch — the banner path is otherwise only reachable
+   * in the window between a release and installing it.
+   */
+  const offered = await checkForUpdate();
+  const behind = typeof siteVersion === "string" && isNewer(siteVersion, currentVersion);
+  if (behind) {
+    check(
+      "newer version is offered when behind",
+      offered?.version === siteVersion,
+      `offered=${offered?.version ?? "none"} site=${siteVersion}`,
+    );
+    check("installer link points at an .exe", Boolean(offered?.downloadUrl.endsWith(".exe")));
+    // The banner renders after its own start delay; give it room before looking.
+    await sleep(4500);
+    const banner = document.querySelector(".update-banner");
+    check("update banner is shown", Boolean(banner), banner?.textContent?.slice(0, 60) ?? "absent");
+  } else {
+    check(
+      "no update offered when running the newest version",
+      offered === null,
+      offered ? `offered ${offered.version}` : "silent",
+    );
+    check("no banner when up to date", !document.querySelector(".update-banner"));
+  }
   check(
     "footer shows either a version line or an update banner",
     Boolean(document.querySelector(".version-line, .update-banner")),
