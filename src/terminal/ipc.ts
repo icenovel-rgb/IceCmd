@@ -64,3 +64,7 @@ export const logLine = (message: string) =>
   invoke<void>("log_line", { message }).catch(() => {});
 
 export const openExternal = (url: string) => invoke<void>("open_external", { url });
+
+/** Opens a folder in Explorer / Finder / the desktop file manager. */
+export const openInFileManager = (path: string) =>
+  invoke<void>("open_in_file_manager", { path });

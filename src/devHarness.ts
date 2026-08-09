@@ -14,7 +14,13 @@
  */
 import { paneIds } from "./layout/tree";
 import { useWorkspace } from "./store/workspace";
-import { logLine, openExternal, sessionAlive, writeSession } from "./terminal/ipc";
+import {
+  logLine,
+  openExternal,
+  openInFileManager,
+  sessionAlive,
+  writeSession,
+} from "./terminal/ipc";
 import { getEntry } from "./terminal/termRegistry";
 import { clearAttention } from "./terminal/status";
 
@@ -340,6 +346,22 @@ export async function runHarness(mode = "1"): Promise<void> {
     .then(() => false)
     .catch(() => true);
   check("open_external refuses non-web links", rejected);
+
+  // --- open in Explorer: the menu item must exist, and only folders are accepted ---
+  useWorkspace.getState().setActiveProject(idPlain);
+  await sleep(500);
+  check(
+    "folder header offers open-in-Explorer",
+    Boolean(document.querySelector('.tree-header-actions button[title="탐색기에서 열기"]')),
+  );
+  const fileRejected = await openInFileManager(`${PATH_PLAIN}\\package.json`)
+    .then(() => false)
+    .catch(() => true);
+  check("open_in_file_manager refuses a file", fileRejected);
+  const missingRejected = await openInFileManager(`${PATH_PLAIN}\\__no_such_dir__`)
+    .then(() => false)
+    .catch(() => true);
+  check("open_in_file_manager refuses a missing path", missingRejected);
 
   // --- status rollup (R5) ---
   await writeSession(panePlain, `echo ${MARK}-status\r`);

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useWorkspace } from "../store/workspace";
 import { paneIds } from "../layout/tree";
 import { clearAttention } from "../terminal/status";
+import { openInFileManager } from "../terminal/ipc";
 import ProjectItem from "./ProjectItem";
 import { listenForFolderDrop } from "./dnd";
 
@@ -97,6 +98,17 @@ export default function Sidebar() {
           <div className="context-menu" style={{ left: menu.x, top: menu.y }}>
             <button
               type="button"
+              onClick={() => {
+                const target = projects.find((p) => p.id === menu.projectId);
+                if (target) void openInFileManager(target.path).catch(() => {});
+                setMenu(null);
+              }}
+            >
+              탐색기에서 열기
+            </button>
+            <button
+              type="button"
+              className="context-danger"
               onClick={() => {
                 removeProject(menu.projectId);
                 setMenu(null);

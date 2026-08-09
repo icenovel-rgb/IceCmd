@@ -19,6 +19,7 @@ pub fn run() {
             commands::session_alive,
             commands::log_line,
             commands::open_external,
+            commands::open_in_file_manager,
             fs_tree::read_dir,
             fs_tree::path_info,
             persist::load_state,

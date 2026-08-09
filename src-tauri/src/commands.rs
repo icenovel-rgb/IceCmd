@@ -88,6 +88,43 @@ pub fn log_line(message: String) {
     eprintln!("[fe] {message}");
 }
 
+/// Opens a folder in the OS file manager.
+#[tauri::command]
+pub fn open_in_file_manager(path: String) -> Result<(), String> {
+    // Only a directory that actually exists. This never takes a command line, only
+    // a path, so there is nothing for a crafted string to smuggle in.
+    let target = std::path::Path::new(&path);
+    if !target.is_dir() {
+        return Err(format!("not a folder: {path}"));
+    }
+
+    #[cfg(windows)]
+    let mut command = {
+        let mut c = std::process::Command::new("explorer.exe");
+        c.arg(target);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(target);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(target);
+        c
+    };
+
+    // explorer.exe reports a non-zero exit even when it opened the window, so the
+    // spawn succeeding is the only signal worth checking.
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not open folder: {e}"))
+}
+
 /// Hands a web link to the system browser.
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {

@@ -334,8 +334,19 @@ button:disabled {
 }
 
 .context-menu button:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Destructive item keeps its own colour so it cannot be hit by muscle memory. */
+.context-menu button.context-danger:hover {
   background: var(--danger);
   color: #fff;
+}
+
+.tree-header-actions {
+  display: flex;
+  gap: 4px;
 }
 
 /* ---------- workspace, panes, dividers ---------- */

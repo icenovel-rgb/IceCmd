@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FsEntry } from "../types";
-import { readDir } from "../terminal/ipc";
+import { openInFileManager, readDir } from "../terminal/ipc";
 
 interface Props {
   rootPath: string;
@@ -58,6 +58,12 @@ export default function FolderTree({ rootPath }: Props) {
             className={`tree-row${entry.isDir ? " tree-dir" : ""}`}
             style={{ paddingLeft: 6 + depth * 12 }}
             onClick={() => entry.isDir && toggle(childPath)}
+            // A folder row opens in Explorer on double-click; single click still
+            // expands, so the two gestures do not fight.
+            onDoubleClick={() => {
+              if (entry.isDir) void openInFileManager(childPath).catch(() => {});
+            }}
+            title={entry.isDir ? "클릭: 펼치기 · 더블클릭: 탐색기에서 열기" : entry.name}
           >
             <span className="tree-caret">{entry.isDir ? (isOpen ? "▾" : "▸") : ""}</span>
             <span className="tree-name">{entry.name}</span>
@@ -72,9 +78,18 @@ export default function FolderTree({ rootPath }: Props) {
     <div className="folder-tree">
       <div className="tree-header">
         <span>폴더</span>
-        <button type="button" title="새로 읽기" onClick={() => void load(rootPath)}>
-          ⟳
-        </button>
+        <span className="tree-header-actions">
+          <button
+            type="button"
+            title="탐색기에서 열기"
+            onClick={() => void openInFileManager(rootPath).catch(() => {})}
+          >
+            ⊞
+          </button>
+          <button type="button" title="새로 읽기" onClick={() => void load(rootPath)}>
+            ⟳
+          </button>
+        </span>
       </div>
       <div className="tree-body">{renderLevel(rootPath, 0)}</div>
     </div>
