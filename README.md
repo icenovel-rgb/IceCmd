@@ -3,6 +3,12 @@
 가벼운 터미널 프로젝트 매니저. 폴더를 끌어다 놓으면 프로젝트가 되고, 그 폴더에서 cmd·claude·codex를
 바로 띄워 화면을 자유롭게 분할해 쓴다. Windows 우선, macOS는 이후.
 
+**다운로드**: [최신 Windows 설치 파일](https://github.com/icenovel-rgb/IceCmd/releases/latest/download/IceCmd-Setup-x64.exe)
+· [모든 릴리스](https://github.com/icenovel-rgb/IceCmd/releases)
+
+실측 (릴리스 빌드, 셸 5개 열어둔 유휴 상태): 상주 메모리 private working set 약 **125MB**,
+CPU **0.0%**, 설치 파일 **1.7MB**.
+
 ## 왜 이 구조인가
 
 | 항목 | 선택 | 이유 |
@@ -23,6 +29,29 @@ npm run tauri build        # 배포 빌드 (NSIS 설치 파일)
 npx tsc --noEmit           # 프론트엔드 타입 검사
 cd src-tauri && cargo check # 백엔드 검사
 ```
+
+### 릴리스 내보내기
+
+버전은 `package.json`·`src-tauri/tauri.conf.json`·`src-tauri/Cargo.toml` 세 곳에 있다.
+손으로 고치면 하나를 빼먹으므로 스크립트로 한 번에 바꾼다.
+
+```bash
+node scripts/bump-version.mjs 0.2.0
+git commit -am "chore: 0.2.0"
+git tag v0.2.0
+git push --follow-tags
+```
+
+태그가 올라가면 `.github/workflows/release.yml`이 Windows 설치 파일을 빌드해 그 태그의 릴리스에
+붙인다. 버전이 붙은 파일과 함께 **버전 무관 사본**(`IceCmd-Setup-x64.exe`)도 올리므로,
+배포 페이지는 아래 주소만 걸어두면 항상 최신을 가리킨다.
+
+```
+https://github.com/icenovel-rgb/IceCmd/releases/latest/download/IceCmd-Setup-x64.exe
+```
+
+워크플로는 빌드 전에 `bump-version.mjs --check <태그>`로 **태그와 소스 버전이 일치하는지 확인**하고,
+어긋나면 릴리스를 만들지 않는다.
 
 ### 창을 보지 않고 검증하기
 

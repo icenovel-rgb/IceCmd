@@ -1,0 +1,59 @@
+name: release
+
+# 버전 태그를 밀면 설치 파일을 빌드해 그 태그의 릴리스에 붙인다.
+#   node scripts/bump-version.mjs 0.2.0
+#   git commit -am "chore: 0.2.0" && git tag v0.2.0 && git push --follow-tags
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 이미 있는 태그에 대해 다시 빌드
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # 프론트엔드보다 Rust 빌드가 압도적으로 오래 걸리므로 캐시가 효과가 크다.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # 태그와 소스의 버전이 어긋난 채로 릴리스가 나가는 것을 막는다.
+      - name: 버전 일치 확인
+        shell: bash
+        run: node scripts/bump-version.mjs --check "${{ github.event.inputs.tag || github.ref_name }}"
+
+      - run: npx tsc --noEmit
+      - run: npm run tauri build
+
+      - name: 릴리스에 설치 파일 첨부
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          setup=$(ls src-tauri/target/release/bundle/nsis/*-setup.exe | head -1)
+          # 버전이 붙지 않은 사본도 올린다. 그래야 사이트에서
+          # releases/latest/download/IceCmd-Setup-x64.exe 로 항상 최신을 가리킬 수 있다.
+          cp "$setup" IceCmd-Setup-x64.exe
+          gh release create "$TAG" --title "IceCmd ${TAG#v}" --generate-notes || true
+          gh release upload "$TAG" "$setup" IceCmd-Setup-x64.exe --clobber
