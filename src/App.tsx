@@ -46,6 +46,9 @@ export default function App() {
     if (harnessMode) {
       void import("./devHarness").then((module) => module.runHarness(harnessMode));
     }
+    if (import.meta.env.VITE_ICECMD_TOUR) {
+      void import("./devTour").then((module) => module.runTour());
+    }
 
     return () => {
       stopStatusMonitor();
