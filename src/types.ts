@@ -30,3 +30,22 @@ export interface SessionExit {
   sessionId: string;
   exitCode: number | null;
 }
+
+/** One rolling allowance, as the CLI last reported it. */
+export interface UsageWindow {
+  percent: number;
+  resetsAtMs: number | null;
+}
+
+export interface ToolUsage {
+  session: UsageWindow | null;
+  weekly: UsageWindow | null;
+  plan: string | null;
+  /** When the CLI wrote this reading; null if it could not be determined. */
+  measuredAtMs: number | null;
+}
+
+export interface CliUsage {
+  claude: ToolUsage | null;
+  codex: ToolUsage | null;
+}

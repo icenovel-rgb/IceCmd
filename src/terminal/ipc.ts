@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { FsEntry, PathInfo, SessionKind } from "../types";
+import type { CliUsage, FsEntry, PathInfo, SessionKind } from "../types";
 
 /**
  * Tauri delivers channel payloads as an ArrayBuffer, but small ones travel a
@@ -74,3 +74,6 @@ export const openPath = (path: string) => invoke<void>("open_path", { path });
 
 /** Shows a file in the file manager with it selected. */
 export const revealPath = (path: string) => invoke<void>("reveal_path", { path });
+
+/** Plan usage for the logged-in CLIs, read from the caches they keep on disk. */
+export const cliUsage = () => invoke<CliUsage>("cli_usage");

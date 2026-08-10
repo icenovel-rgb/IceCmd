@@ -2,6 +2,7 @@ mod commands;
 mod fs_tree;
 mod persist;
 mod pty;
+mod usage;
 
 use pty::SessionManager;
 use tauri::Manager;
@@ -26,6 +27,7 @@ pub fn run() {
             fs_tree::path_info,
             persist::load_state,
             persist::save_state,
+            usage::cli_usage,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

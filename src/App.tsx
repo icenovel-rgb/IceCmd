@@ -1,12 +1,14 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { SessionExit } from "./types";
 import { DEFAULT_UI, useWorkspace } from "./store/workspace";
 import { hydrate, startAutoSave } from "./store/persist";
 import PaneStage from "./layout/PaneStage";
 import Sidebar from "./sidebar/Sidebar";
+import { listenForPathDrop } from "./sidebar/dnd";
 import RightPanel from "./rightpanel/RightPanel";
 import ResizeHandle from "./chrome/ResizeHandle";
+import UsageBar from "./chrome/UsageBar";
 import {
   allEntries,
   applyFontSize,
@@ -26,8 +28,35 @@ export default function App() {
   const ui = useWorkspace((s) => s.ui);
   const setSidebarWidth = useWorkspace((s) => s.setSidebarWidth);
   const setRightPanelWidth = useWorkspace((s) => s.setRightPanelWidth);
+  const addProject = useWorkspace((s) => s.addProject);
 
   useShortcuts();
+
+  // With no terminal on screen there is nothing else the middle could mean, so
+  // a folder dropped there joins the sidebar. Once panes exist they own their
+  // own drops (a path typed at the cursor), and this target steps aside.
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const [workspaceDrop, setWorkspaceDrop] = useState(false);
+  const stageEmpty = !activeProjectId || !layouts[activeProjectId];
+  const stageEmptyRef = useRef(stageEmpty);
+  stageEmptyRef.current = stageEmpty;
+
+  useEffect(() => {
+    const pending = listenForPathDrop({
+      // Returning null while panes are up is what makes the pane win: the drop
+      // is then simply outside this target.
+      element: () => (stageEmptyRef.current ? workspaceRef.current : null),
+      onHover: setWorkspaceDrop,
+      onDrop: (dropped) => {
+        for (const entry of dropped) {
+          if (entry.isDir) addProject(entry.path, entry.name);
+        }
+      },
+    });
+    return () => {
+      void pending.then((unlisten) => unlisten());
+    };
+  }, [addProject]);
 
   useEffect(() => {
     void hydrate();
@@ -95,58 +124,67 @@ export default function App() {
   return (
     // --ui-scale drives the `zoom` on the chrome. Panel widths are stored unzoomed,
     // so the pointer position has to be divided by the scale to match.
-    <div className="app-shell" style={{ "--ui-scale": ui.uiScale } as React.CSSProperties}>
-      <div className="sidebar-wrap" style={{ width: ui.sidebarWidth }}>
-        <Sidebar />
-      </div>
-      <ResizeHandle
-        side="right"
-        widthFrom={(clientX) => clientX / ui.uiScale}
-        onWidth={setSidebarWidth}
-        onReset={() => setSidebarWidth(DEFAULT_UI.sidebarWidth)}
-      />
+    <div className="app-root" style={{ "--ui-scale": ui.uiScale } as React.CSSProperties}>
+      <div className="app-shell">
+        <div className="sidebar-wrap" style={{ width: ui.sidebarWidth }}>
+          <Sidebar />
+        </div>
+        <ResizeHandle
+          side="right"
+          widthFrom={(clientX) => clientX / ui.uiScale}
+          onWidth={setSidebarWidth}
+          onReset={() => setSidebarWidth(DEFAULT_UI.sidebarWidth)}
+        />
 
-      <div className="workspace">
-        {projects.map((project) => {
-          const layout = layouts[project.id];
-          const isActive = project.id === activeProjectId;
-          return (
-            <div
-              key={project.id}
-              className="project-stage"
-              // Kept mounted so switching projects is instant and scrollback survives.
-              style={{ display: isActive ? "block" : "none" }}
-            >
-              {layout ? (
-                <PaneStage projectId={project.id} layout={layout} active={isActive} />
-              ) : (
-                <div className="empty-hint">
-                  페인이 없습니다.
-                  <br />
-                  오른쪽에서 cmd·claude·codex를 눌러 새로 여세요.
-                </div>
-              )}
+        <div
+          ref={workspaceRef}
+          className={`workspace${workspaceDrop ? " drop-active" : ""}`}
+        >
+          {projects.map((project) => {
+            const layout = layouts[project.id];
+            const isActive = project.id === activeProjectId;
+            return (
+              <div
+                key={project.id}
+                className="project-stage"
+                // Kept mounted so switching projects is instant and scrollback survives.
+                style={{ display: isActive ? "block" : "none" }}
+              >
+                {layout ? (
+                  <PaneStage projectId={project.id} layout={layout} active={isActive} />
+                ) : (
+                  <div className="empty-hint">
+                    페인이 없습니다.
+                    <br />
+                    오른쪽에서 cmd·claude·codex를 눌러 새로 여세요.
+                    <br />
+                    폴더를 여기로 끌어다 놓으면 프로젝트로 추가됩니다.
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {hydrated && projects.length === 0 && (
+            <div className="empty-hint">
+              폴더를 여기나 왼쪽 사이드바로 끌어다 놓으면
+              <br />
+              프로젝트가 추가되고 터미널이 열립니다.
             </div>
-          );
-        })}
-        {hydrated && projects.length === 0 && (
-          <div className="empty-hint">
-            왼쪽 사이드바로 폴더를 끌어다 놓으면
-            <br />
-            프로젝트가 추가되고 터미널이 열립니다.
-          </div>
-        )}
+          )}
+        </div>
+
+        <ResizeHandle
+          side="left"
+          widthFrom={(clientX) => (window.innerWidth - clientX) / ui.uiScale}
+          onWidth={setRightPanelWidth}
+          onReset={() => setRightPanelWidth(DEFAULT_UI.rightPanelWidth)}
+        />
+        <div className="rightpanel-wrap" style={{ width: ui.rightPanelWidth }}>
+          <RightPanel />
+        </div>
       </div>
 
-      <ResizeHandle
-        side="left"
-        widthFrom={(clientX) => (window.innerWidth - clientX) / ui.uiScale}
-        onWidth={setRightPanelWidth}
-        onReset={() => setRightPanelWidth(DEFAULT_UI.rightPanelWidth)}
-      />
-      <div className="rightpanel-wrap" style={{ width: ui.rightPanelWidth }}>
-        <RightPanel />
-      </div>
+      <UsageBar />
     </div>
   );
 }

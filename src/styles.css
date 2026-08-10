@@ -111,9 +111,17 @@ button:disabled {
   background-clip: padding-box;
 }
 
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 .app-shell {
   display: flex;
-  height: 100%;
+  /* min-height 없이는 페인이 넘칠 때 상태줄이 화면 밖으로 밀린다. */
+  flex: 1;
+  min-height: 0;
 }
 
 /* ---------- panel resize strips ---------- */
@@ -451,6 +459,13 @@ button:disabled {
   flex: 1;
   min-width: 0;
   background: var(--bg);
+}
+
+/* 페인이 하나도 없을 때만 가운데가 드롭을 받는다 — 페인이 있으면 페인이 임자다. */
+.workspace.drop-active {
+  outline: 2px dashed var(--accent-hi);
+  outline-offset: -6px;
+  background: var(--accent-soft);
 }
 
 .project-stage,
@@ -912,5 +927,97 @@ button:disabled {
 .tree-note {
   margin: 2px 0 2px 18px;
   font-size: 11px;
+  color: var(--hint);
+}
+
+/* ---------- 하단 상태줄: CLI 사용량 ---------- */
+
+/*
+ * 터미널에서 뺏는 높이를 최소로 — 한 줄, 22px. 사이드바·오른쪽 패널과 같은 배율을
+ * 따라가야 화면 배율을 올렸을 때 혼자 작게 남지 않는다.
+ */
+.usage-bar {
+  zoom: var(--ui-scale, 1);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--toolbar);
+  border-top: 1px solid var(--seam);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.usage-tool {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.usage-name {
+  font-weight: 700;
+  color: #cdd0d6;
+}
+
+.usage-tool-empty .usage-name,
+.usage-none {
+  color: var(--hint);
+  font-weight: 400;
+}
+
+.usage-meter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.usage-label {
+  color: var(--hint);
+}
+
+/* 막대는 숫자의 보조다 — 숫자를 읽지 않고도 위험한지 알 수 있을 만큼만 굵게. */
+.usage-track {
+  width: 46px;
+  height: 5px;
+  background: var(--well);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.usage-fill {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+  border-radius: 3px;
+}
+
+.usage-warn .usage-fill {
+  background: var(--dirty);
+}
+
+.usage-danger .usage-fill {
+  background: var(--danger);
+}
+
+.usage-percent {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.usage-warn .usage-percent {
+  color: var(--dirty);
+}
+
+.usage-danger .usage-percent {
+  color: #e46a6b;
+}
+
+/* 캐시라서 CLI를 안 돌리면 값이 멈춘다. 그 사실을 숨기지 않는다. */
+.usage-age {
   color: var(--hint);
 }

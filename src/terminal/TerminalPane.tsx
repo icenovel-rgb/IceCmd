@@ -4,6 +4,7 @@ import ContextMenu from "../chrome/ContextMenu";
 import { listenForPathDrop } from "../sidebar/dnd";
 import { copyText, pasteInto, selectionOf } from "./clipboard";
 import { dropTextFor } from "./dropText";
+import { dragCarriesPath, pathFromDrag } from "./pathDrag";
 import { createSession, killSession, writeSession } from "./ipc";
 import {
   attachWebgl,
@@ -59,6 +60,16 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
       void writeSession(paneId, data);
     });
 
+    // Opt-in IME tracing; the module is never pulled into a normal build.
+    let stopImeWatch: (() => void) | null = null;
+    let paneGone = false;
+    if (import.meta.env.VITE_ICECMD_IME_DEBUG) {
+      void import("./imeDebug").then((module) => {
+        if (paneGone) return;
+        stopImeWatch = module.watchIme(paneId, entry.term);
+      });
+    }
+
     entry.sentCols = entry.term.cols;
     entry.sentRows = entry.term.rows;
     void createSession(
@@ -77,6 +88,8 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
     observer.observe(host);
 
     return () => {
+      paneGone = true;
+      stopImeWatch?.();
       observer.disconnect();
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       onData.dispose();
@@ -86,30 +99,56 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
     };
   }, [paneId, cwd, kind]);
 
+  // The class is toggled by hand rather than through state: a drag fires an
+  // `over` event continuously, and re-rendering a terminal on each one would
+  // cost far more than the outline is worth.
+  const markDrop = useCallback(
+    (inside: boolean) => hostRef.current?.classList.toggle("drop-active", inside),
+    [],
+  );
+
   // Dropping files or folders on a pane types their paths at the cursor.
   useEffect(() => {
-    // The class is toggled by hand rather than through state: a drag fires an
-    // `over` event continuously, and re-rendering a terminal on each one would
-    // cost far more than the outline is worth.
-    const mark = (inside: boolean) => hostRef.current?.classList.toggle("drop-active", inside);
     const pending = listenForPathDrop({
       element: () => hostRef.current,
-      onHover: mark,
+      onHover: markDrop,
       onDrop: (dropped) => {
-        mark(false);
+        markDrop(false);
         void writeSession(paneId, dropTextFor(dropped.map((entry) => entry.path)));
       },
     });
     return () => {
       void pending.then((unlisten) => unlisten());
     };
-  }, [paneId]);
+  }, [paneId, markDrop]);
 
   return (
     <>
       <div
         className="terminal-host"
         ref={hostRef}
+        // The same outcome as an Explorer drop, but an in-app drag arrives
+        // through the DOM rather than through Tauri's own drop event.
+        onDragOver={(event) => {
+          if (!dragCarriesPath(event)) return;
+          // Without this the drop never happens: the default is "reject".
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          markDrop(true);
+        }}
+        // Moving between the host's own children fires a leave; only a pointer
+        // that has actually left the pane should clear the outline.
+        onDragLeave={(event) => {
+          if (hostRef.current?.contains(event.relatedTarget as Node | null)) return;
+          markDrop(false);
+        }}
+        onDrop={(event) => {
+          const path = pathFromDrag(event);
+          if (!path) return;
+          event.preventDefault();
+          markDrop(false);
+          void writeSession(paneId, dropTextFor([path]));
+        }}
         // Blocking the WebView2 menu took Edge's copy/paste with it, so the pane
         // offers its own. Ctrl+Shift+C/V still do the same two things.
         onContextMenu={(event) => {

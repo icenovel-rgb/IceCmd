@@ -14,8 +14,10 @@
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { paneIds } from "./layout/tree";
+import type { ToolUsage, UsageWindow } from "./types";
 import { useWorkspace } from "./store/workspace";
 import {
+  cliUsage,
   loadState,
   logLine,
   openExternal,
@@ -28,6 +30,7 @@ import {
 import { getEntry } from "./terminal/termRegistry";
 import { clearAttention } from "./terminal/status";
 import { dropTextFor } from "./terminal/dropText";
+import { PATH_MIME } from "./terminal/pathDrag";
 import { handleDropPayload, type DroppedPath } from "./sidebar/dnd";
 import { checkForUpdate, currentVersion, isNewer } from "./update";
 
@@ -322,7 +325,12 @@ export async function runHarness(mode = "1"): Promise<void> {
   await sleep(3000);
   const panePlain = panesOf(idPlain)[0];
   const paneSpaces = panesOf(idSpaces)[0];
-  check("auto shell cwd (plain path)", screen(panePlain).includes("D:\\dev\\IceCmd"));
+  check(
+    "auto shell cwd (plain path)",
+    screen(panePlain).includes("D:\\dev\\IceCmd"),
+    // Printed so a failure says whether the prompt was wrong or merely late.
+    `tail=${JSON.stringify(screen(panePlain).trim().slice(-60))}`,
+  );
   check("auto shell cwd (path with spaces)", screen(paneSpaces).includes("Naver MYBOX"));
 
   // Noted before this run writes anything, to be compared at the end.
@@ -437,11 +445,21 @@ export async function runHarness(mode = "1"): Promise<void> {
   useWorkspace.getState().setUiScale(1.3);
   await sleep(500);
   const scaleNow = useWorkspace.getState().ui.uiScale;
-  const shell = document.querySelector(".app-shell") as HTMLElement | null;
+  // Read as computed rather than as an inline style: what matters is that the
+  // value reaches the chrome, not which element happens to declare it.
+  const scaleAt = (selector: string) => {
+    const element = document.querySelector(selector);
+    return element ? getComputedStyle(element).getPropertyValue("--ui-scale").trim() : "";
+  };
   check(
     "ui scale reaches the stylesheet",
-    shell?.style.getPropertyValue("--ui-scale") === String(scaleNow),
-    `var=${shell?.style.getPropertyValue("--ui-scale")} store=${scaleNow}`,
+    scaleAt(".app-shell") === String(scaleNow),
+    `var=${scaleAt(".app-shell")} store=${scaleNow}`,
+  );
+  check(
+    "ui scale reaches the status bar too",
+    scaleAt(".usage-bar") === String(scaleNow),
+    `var=${scaleAt(".usage-bar")} store=${scaleNow}`,
   );
   const storedWidth = useWorkspace.getState().ui.sidebarWidth;
   const paintedWidth = document.querySelector(".sidebar-wrap")?.getBoundingClientRect().width ?? 0;
@@ -832,6 +850,140 @@ export async function runHarness(mode = "1"): Promise<void> {
     // Nothing was executed and nothing should be: clear the line the drop typed.
     await writeSession(panePlain, "\x1b");
     await sleep(500);
+  }
+
+  /*
+   * --- dragging a row out of the folder tree ---
+   *
+   * A drag that starts inside the app is an ordinary HTML5 one, so unlike the
+   * Explorer drops above it can be dispatched end to end here: the tree row
+   * really is the source and the pane's own handler really is the target.
+   */
+  const treeRow = document.querySelector<HTMLElement>(".tree-row[data-path]");
+  check("the folder tree has rows on screen", Boolean(treeRow));
+  if (treeRow) {
+    check("a tree row can be picked up", treeRow.draggable);
+    const carried = new DataTransfer();
+    treeRow.dispatchEvent(
+      new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: carried }),
+    );
+    check(
+      "dragging a row carries that row's own path",
+      carried.getData(PATH_MIME) === treeRow.dataset.path,
+      `carried=${carried.getData(PATH_MIME)} row=${treeRow.dataset.path}`,
+    );
+  }
+
+  if (host) {
+    // A different path from the Explorer drop above, so a leftover line on the
+    // screen cannot pass this check for it.
+    const draggedPath = `${PATH_SPACES}\\release`;
+    const transfer = new DataTransfer();
+    transfer.setData(PATH_MIME, draggedPath);
+
+    host.dispatchEvent(
+      new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+    check("a path dragged over a pane marks it as the target", host.classList.contains("drop-active"));
+
+    host.dispatchEvent(
+      new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+    await sleep(900);
+    check(
+      "dropping it on the pane types the path, quoted",
+      screen(panePlain).includes(`"${draggedPath}"`),
+      `want="${draggedPath}"`,
+    );
+    check("the target mark is cleared after the drop", !host.classList.contains("drop-active"));
+    await writeSession(panePlain, "\x1b");
+    await sleep(500);
+  }
+
+  /*
+   * --- the Hangul IME must not deliver a syllable twice ---
+   *
+   * The measured failure: on a keydown with keyCode 229 xterm.js queues a
+   * fallback that sends whatever appeared in its textarea a tick later, and the
+   * IME's own keypress has already sent the same syllable. Reproduced here by
+   * doing exactly that — announce an IME keystroke, then put a syllable in the
+   * textarea the way the IME does — and asserting nothing is sent.
+   */
+  const imeEntry = getEntry(panePlain);
+  const imeArea = imeEntry?.term.textarea;
+  check("the terminal exposes the textarea the IME writes into", Boolean(imeArea));
+  if (imeEntry && imeArea) {
+    let sent = "";
+    const tap = imeEntry.term.onData((data) => {
+      sent += data;
+    });
+    const restore = imeArea.value;
+    imeArea.value = "";
+
+    // `keyCode` is not settable through the constructor, and it is the only part
+    // of the event xterm.js looks at here.
+    const imeKey = new KeyboardEvent("keydown", { bubbles: true, cancelable: true });
+    Object.defineProperty(imeKey, "keyCode", { get: () => 229 });
+    imeArea.dispatchEvent(imeKey);
+    imeArea.value = "가";
+    await sleep(120);
+
+    tap.dispose();
+    imeArea.value = restore;
+    imeArea.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true }));
+    check("an IME keystroke queues no second send of the syllable", sent === "", JSON.stringify(sent));
+  }
+
+  /*
+   * --- the cursor stops strobing while a CLI is working ---
+   *
+   * xterm.js restarts the blink animation on every cursor move, so a TUI that
+   * repaints continuously makes the cursor flicker instead of blink.
+   */
+  if (imeEntry) {
+    await writeSession(panePlain, `echo ${MARK}-blink\r`);
+    await sleep(250);
+    check(
+      "the cursor is held still while output is arriving",
+      imeEntry.term.options.cursorBlink === false,
+    );
+    await sleep(1100);
+    check(
+      "the cursor blinks again once the output stops",
+      imeEntry.term.options.cursorBlink === true,
+    );
+  }
+
+  /*
+   * --- plan usage, read from the caches the CLIs keep ---
+   *
+   * Each number is only as fresh as the last run of that CLI, so the stamp is
+   * checked as carefully as the value: an unstamped reading would be presented
+   * as current when it might be days old.
+   */
+  const usage = await cliUsage().catch(() => null);
+  check("cli_usage answers", usage !== null);
+  if (usage) {
+    const tools = [usage.claude, usage.codex].filter((tool): tool is ToolUsage => Boolean(tool));
+    const windows = tools
+      .flatMap((tool) => [tool.session, tool.weekly])
+      .filter((window): window is UsageWindow => Boolean(window));
+    check("at least one CLI reported a usage window", windows.length > 0, `windows=${windows.length}`);
+    check(
+      "every reported figure is a real percentage",
+      windows.every((window) => window.percent >= 0 && window.percent <= 100),
+      JSON.stringify(windows.map((window) => window.percent)),
+    );
+    const stamps = tools
+      .map((tool) => tool.measuredAtMs)
+      .filter((stamp): stamp is number => typeof stamp === "number");
+    check("every reading carries when it was taken", stamps.length === tools.length);
+    check(
+      "no reading claims to come from the future",
+      // 2023-11 is comfortably before either CLI existed.
+      stamps.every((stamp) => stamp > 1.7e12 && stamp < Date.now() + 60_000),
+      JSON.stringify(stamps),
+    );
   }
 
   /*

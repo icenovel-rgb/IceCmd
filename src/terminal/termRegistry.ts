@@ -6,12 +6,22 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { guardImeInput } from "./ime";
 import { ackOutput, resizeSession } from "./ipc";
 
 /** Ack early enough that the reader never hits its high-water mark. */
 const ACK_THRESHOLD = 128 * 1024;
 /** Also ack after a lull, or trailing bytes below the threshold are never released. */
 const ACK_IDLE_MS = 40;
+/**
+ * How long the cursor stays solid after the last byte of output.
+ *
+ * xterm.js restarts the blink animation every time the cursor moves, so a TUI
+ * that repaints continuously — codex and claude both do — makes the cursor
+ * strobe instead of blink. Holding it solid while output is flowing costs
+ * nothing and is also the honest signal: a still cursor means "working".
+ */
+const BLINK_RESUME_MS = 700;
 
 export interface TermEntry {
   paneId: string;
@@ -28,6 +38,9 @@ export interface TermEntry {
   disposed: boolean;
   /** Latest PTY output time, used for the busy indicator. */
   lastOutputAt: number;
+  /** Set while the cursor is held solid because output is still arriving. */
+  blinkHeld: boolean;
+  blinkTimer: number | null;
   /** True after a BEL until the user looks at the project. */
   attention: boolean;
   exited: boolean;
@@ -66,6 +79,8 @@ export function createEntry(paneId: string, fontSize: number): TermEntry {
     },
   });
 
+  guardImeInput(term);
+
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new Unicode11Addon());
@@ -82,6 +97,8 @@ export function createEntry(paneId: string, fontSize: number): TermEntry {
     sentRows: 0,
     disposed: false,
     lastOutputAt: 0,
+    blinkHeld: false,
+    blinkTimer: null,
     attention: false,
     exited: false,
   };
@@ -146,11 +163,30 @@ export function applyFontSize(size: number): void {
   }
 }
 
+/**
+ * Holds the cursor solid until the output stops. The timer is only restarted
+ * here; the option itself changes twice per burst, not once per chunk.
+ */
+function holdCursor(entry: TermEntry): void {
+  if (!entry.blinkHeld) {
+    entry.blinkHeld = true;
+    entry.term.options.cursorBlink = false;
+  }
+  if (entry.blinkTimer !== null) window.clearTimeout(entry.blinkTimer);
+  entry.blinkTimer = window.setTimeout(() => {
+    entry.blinkTimer = null;
+    if (entry.disposed) return;
+    entry.blinkHeld = false;
+    entry.term.options.cursorBlink = true;
+  }, BLINK_RESUME_MS);
+}
+
 /** Writes PTY bytes and acks them once xterm has parsed them. */
 export function writeOutput(entry: TermEntry, chunk: Uint8Array | string): void {
   if (entry.disposed) return;
   const length = typeof chunk === "string" ? chunk.length : chunk.byteLength;
   entry.lastOutputAt = performance.now();
+  holdCursor(entry);
   entry.term.write(chunk, () => {
     if (entry.disposed) return;
     entry.pendingAck += length;
@@ -181,6 +217,7 @@ export function disposeEntry(paneId: string): void {
   if (!entry) return;
   entry.disposed = true;
   if (entry.ackTimer !== null) window.clearTimeout(entry.ackTimer);
+  if (entry.blinkTimer !== null) window.clearTimeout(entry.blinkTimer);
   detachWebgl(entry);
   entry.term.dispose();
   entries.delete(paneId);

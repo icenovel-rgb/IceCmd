@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FsEntry } from "../types";
 import { openInFileManager, openPath, readDir, revealPath } from "../terminal/ipc";
+import { startPathDrag } from "../terminal/pathDrag";
 import { useWorkspace } from "../store/workspace";
 import ContextMenu from "../chrome/ContextMenu";
 
@@ -90,6 +91,10 @@ export default function FolderTree({ projectId, rootPath }: Props) {
             // from the label and depth, and get it wrong.
             data-path={childPath}
             style={{ paddingLeft: 6 + depth * 12 }}
+            // Dragging a row onto a terminal types its path there, the same way
+            // dragging in from Explorer does.
+            draggable
+            onDragStart={(event) => startPathDrag(event, childPath)}
             onClick={() => entry.isDir && toggle(childPath)}
             // A folder row opens in Explorer on double-click; single click still
             // expands, so the two gestures do not fight.
@@ -105,7 +110,11 @@ export default function FolderTree({ projectId, rootPath }: Props) {
                 isDir: entry.isDir,
               });
             }}
-            title={entry.isDir ? "클릭: 펼치기 · 더블클릭: 탐색기에서 열기" : entry.name}
+            title={
+              entry.isDir
+                ? "클릭: 펼치기 · 더블클릭: 탐색기에서 열기 · 끌어서 터미널에 놓으면 경로 입력"
+                : `${entry.name} · 끌어서 터미널에 놓으면 경로 입력`
+            }
           >
             <span className="tree-caret">{entry.isDir ? (isOpen ? "▾" : "▸") : ""}</span>
             <span className="tree-name">{entry.name}</span>
