@@ -38,9 +38,14 @@ cd src-tauri && cargo check # 백엔드 검사
 ```bash
 node scripts/bump-version.mjs 0.2.0
 git commit -am "chore: 0.2.0"
-git tag v0.2.0
+git tag -a v0.2.0 -m "IceCmd 0.2.0"
 git push --follow-tags
 ```
+
+**`-a` 를 빼지 마라.** `--follow-tags` 는 annotated 태그만 민다. 가벼운 태그(`git tag v0.2.0`)를
+만들면 `git push --follow-tags` 가 **아무 말 없이 커밋만 밀고 태그는 두고 간다** — 워크플로가
+돌지 않으니 릴리스가 나온 줄 알고 기다리게 된다 (0.5.0 에서 실제로 겪었다).
+확인은 `git ls-remote --tags origin` 으로 한다.
 
 태그가 올라가면 `.github/workflows/release.yml`이 Windows 설치 파일을 빌드해 그 태그의 릴리스에
 붙인다. 워크플로는 빌드 전에 `bump-version.mjs --check <태그>`로 **태그와 소스 버전이 일치하는지
