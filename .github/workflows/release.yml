@@ -43,7 +43,27 @@ jobs:
         run: node scripts/bump-version.mjs --check "${{ github.event.inputs.tag || github.ref_name }}"
 
       - run: npx tsc --noEmit
-      - run: npm run tauri build
+
+      # 번들러는 NSIS 툴체인을 GitHub 릴리스에서 받아 온다. 한 번 받아 두면 다시
+      # 받지 않으므로, 그 다운로드가 죽는 날에도 빌드가 나간다.
+      - name: NSIS 툴체인 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/tauri
+          key: tauri-tools-${{ runner.os }}
+
+      # 그 다운로드가 리셋되면(`io: Peer disconnected`) 5분을 컴파일하고 마지막 1초에
+      # 죽는다 — 우리 코드와 무관하고 잠시 뒤에는 대개 성공한다. 재시도는 컴파일이
+      # 끝난 target 을 그대로 쓰므로 번들 단계만 다시 돈다.
+      - name: 설치 파일 빌드
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm run tauri build; then exit 0; fi
+            echo "::warning::빌드 실패 (시도 ${attempt}/3) — 45초 뒤 다시 시도한다"
+            sleep 45
+          done
+          exit 1
 
       - name: 릴리스에 설치 파일 첨부
         shell: bash
