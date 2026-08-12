@@ -55,6 +55,13 @@ export const readDir = (path: string) => invoke<FsEntry[]>("read_dir", { path })
 
 export const pathInfo = (path: string) => invoke<PathInfo>("path_info", { path });
 
+/**
+ * Replaces the set of folders being watched. Each change to one of them arrives
+ * back as an `fs-changed` event carrying the folders that changed.
+ * An empty list stops watching altogether.
+ */
+export const watchDirs = (paths: string[]) => invoke<void>("watch_dirs", { paths });
+
 export const loadState = () => invoke<string | null>("load_state");
 
 export const saveState = (json: string) => invoke<void>("save_state", { json });

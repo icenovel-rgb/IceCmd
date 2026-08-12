@@ -3,7 +3,7 @@ import { useWorkspace } from "../store/workspace";
 import { openExternal } from "../terminal/ipc";
 import CliButtons from "./CliButtons";
 import FolderTree from "./FolderTree";
-import ScaleControl from "./ScaleControl";
+import SettingsModal from "./SettingsModal";
 import SupportModal from "./SupportModal";
 
 const SITE_URL = "https://icenovel.com";
@@ -14,6 +14,7 @@ export default function RightPanel() {
     s.projects.find((candidate) => candidate.id === s.activeProjectId),
   );
   const [supporting, setSupporting] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (!supporting) return;
@@ -37,7 +38,10 @@ export default function RightPanel() {
       )}
 
       <div className="panel-footer">
-        <ScaleControl />
+        {/* The sliders moved into 설정: they are set once, and the tree needs the room. */}
+        <button type="button" className="settings-open" onClick={() => setSettingsOpen(true)}>
+          ⚙ 설정
+        </button>
         <button
           type="button"
           className="site-link"
@@ -52,6 +56,7 @@ export default function RightPanel() {
         </button>
       </div>
 
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {supporting && <SupportModal onClose={() => setSupporting(false)} />}
     </aside>
   );

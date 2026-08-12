@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionKind } from "../types";
 import ContextMenu from "../chrome/ContextMenu";
+import { useWorkspace } from "../store/workspace";
 import { listenForPathDrop } from "../sidebar/dnd";
 import { copyText, pasteInto, selectionOf } from "./clipboard";
 import { dropTextFor } from "./dropText";
-import { dragCarriesPath, pathFromDrag } from "./pathDrag";
 import { createSession, killSession, writeSession } from "./ipc";
 import {
   attachWebgl,
   createEntry,
   disposeEntry,
+  getEntry,
   syncSize,
   writeOutput,
 } from "./termRegistry";
@@ -38,6 +39,7 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
   fontSizeRef.current = initialFontSize;
   const [menu, setMenu] = useState<Menu | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  const rightClick = useWorkspace((s) => s.prefs.rightClick);
 
   // Owns the whole lifetime of one PTY. React.StrictMode is deliberately not
   // used (see main.tsx): its double-mount would spawn two shells per pane.
@@ -99,6 +101,35 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
     };
   }, [paneId, cwd, kind]);
 
+  /*
+   * The right button never reaches xterm.js.
+   *
+   * A TUI that has asked for mouse reporting — claude and codex both do — gets
+   * every button press forwarded to it as an escape sequence, and a CLI that
+   * treats button 2 as "paste" then pastes on its own while this app is also
+   * putting up its menu. That is the duplicate: two independent pastes from one
+   * click. Swallowing the press in the capture phase, on an ancestor of xterm's
+   * own element, means only one of them can ever happen — the one asked for
+   * here. `contextmenu` is a separate event and still arrives.
+   */
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const swallowRightButton = (event: MouseEvent) => {
+      if (event.button !== 2) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    for (const type of ["mousedown", "mouseup", "auxclick"] as const) {
+      host.addEventListener(type, swallowRightButton, true);
+    }
+    return () => {
+      for (const type of ["mousedown", "mouseup", "auxclick"] as const) {
+        host.removeEventListener(type, swallowRightButton, true);
+      }
+    };
+  }, []);
+
   // The class is toggled by hand rather than through state: a drag fires an
   // `over` event continuously, and re-rendering a terminal on each one would
   // cost far more than the outline is worth.
@@ -127,32 +158,17 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
       <div
         className="terminal-host"
         ref={hostRef}
-        // The same outcome as an Explorer drop, but an in-app drag arrives
-        // through the DOM rather than through Tauri's own drop event.
-        onDragOver={(event) => {
-          if (!dragCarriesPath(event)) return;
-          // Without this the drop never happens: the default is "reject".
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "copy";
-          markDrop(true);
-        }}
-        // Moving between the host's own children fires a leave; only a pointer
-        // that has actually left the pane should clear the outline.
-        onDragLeave={(event) => {
-          if (hostRef.current?.contains(event.relatedTarget as Node | null)) return;
-          markDrop(false);
-        }}
-        onDrop={(event) => {
-          const path = pathFromDrag(event);
-          if (!path) return;
-          event.preventDefault();
-          markDrop(false);
-          void writeSession(paneId, dropTextFor([path]));
-        }}
-        // Blocking the WebView2 menu took Edge's copy/paste with it, so the pane
-        // offers its own. Ctrl+Shift+C/V still do the same two things.
+        /*
+         * Blocking the WebView2 menu took Edge's copy/paste with it, so the pane
+         * offers its own — or pastes outright, if that is what the user set in
+         * 설정. Ctrl+Shift+C/V do the same two things either way.
+         */
         onContextMenu={(event) => {
           event.preventDefault();
+          if (rightClick === "paste") {
+            void pasteInto(paneId);
+            return;
+          }
           setMenu({ x: event.clientX, y: event.clientY, selection: selectionOf(paneId) });
         }}
       />
@@ -167,6 +183,10 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
               ? [{ label: "복사", onSelect: () => void copyText(menu.selection) }]
               : []),
             { label: "붙여넣기", onSelect: () => void pasteInto(paneId) },
+            { label: "모두 선택", onSelect: () => getEntry(paneId)?.term.selectAll() },
+            // Scrollback only: the shell keeps its prompt and whatever is typed
+            // on it, which `cls` would not.
+            { label: "화면 지우기", onSelect: () => getEntry(paneId)?.term.clear() },
           ]}
         />
       )}

@@ -30,7 +30,6 @@ import {
 import { getEntry } from "./terminal/termRegistry";
 import { clearAttention } from "./terminal/status";
 import { dropTextFor } from "./terminal/dropText";
-import { PATH_MIME } from "./terminal/pathDrag";
 import { handleDropPayload, type DroppedPath } from "./sidebar/dnd";
 import { checkForUpdate, currentVersion, isNewer } from "./update";
 
@@ -52,15 +51,28 @@ function check(name: string, ok: boolean, detail = ""): void {
   void logLine(`harness ${ok ? "PASS" : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
+/**
+ * The pane's whole buffer as text, with wrapped rows put back together.
+ *
+ * Every check here asks whether some string is *in* the buffer, and a terminal
+ * row is not a line: anything longer than the pane is broken across rows. Joined
+ * naively with newlines, a state file of 2359 bytes reads as 235 and a path that
+ * straddles the edge is never found — a check that fails, or passes, for reasons
+ * that have nothing to do with what it is testing. `isWrapped` says which rows
+ * are continuations, so the seam can be closed exactly where it was made.
+ */
 function screen(paneId: string): string {
   const term = getEntry(paneId)?.term;
   if (!term) return "";
   const buffer = term.buffer.active;
-  const lines: string[] = [];
+  let text = "";
   for (let row = 0; row < buffer.length; row += 1) {
-    lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+    const line = buffer.getLine(row);
+    if (!line) continue;
+    if (row > 0 && !line.isWrapped) text += "\n";
+    text += line.translateToString(true);
   }
-  return lines.join("\n");
+  return text;
 }
 
 const layoutOf = (projectId: string) => useWorkspace.getState().layouts[projectId] ?? null;
@@ -87,6 +99,29 @@ const rightClick = (element: HTMLElement) => {
       clientY: 220,
     }),
   );
+};
+
+/*
+ * Both drags in this app are pointer drags — Tauri owns the webview's HTML5 drag
+ * pipeline on Windows, so `dragstart` never fires there. That means these can be
+ * dispatched end to end, unlike an Explorer drop.
+ */
+const pointerAt = (type: string, x: number, y: number, button = 0) =>
+  new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 1,
+    pointerType: "mouse",
+    isPrimary: true,
+    clientX: x,
+    clientY: y,
+    button,
+    buttons: type === "pointerup" ? 0 : 1,
+  });
+
+const centreOf = (element: Element) => {
+  const rect = element.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 };
 
 /** Presses a menu item the way a mouse does. See the context-menu section. */
@@ -352,6 +387,77 @@ export async function runHarness(mode = "1"): Promise<void> {
   await sleep(700);
   check("shell tag readable to begin with", await shellIsSameProcess(panePlain));
 
+  /*
+   * --- dragging a project to a new place in the sidebar ---
+   *
+   * The dangerous part is not the array. Reordering keyed children makes React
+   * move their DOM nodes, and a pane's node holds a live terminal — so the list
+   * order is asserted *and* the shell is asked whether it is still the same
+   * process afterwards. `App` draws the stages in an order of its own precisely
+   * so the answer is yes.
+   */
+  const sidebarOrder = () =>
+    Array.from(document.querySelectorAll<HTMLElement>(".project-item")).map((row) => row.title);
+  const firstRow = projectRow(PATH_PLAIN);
+  const secondRow = projectRow(PATH_SPACES);
+  check("both project rows are on screen", Boolean(firstRow && secondRow));
+  if (firstRow && secondRow) {
+    check(
+      "the sidebar starts in the order the projects were added",
+      sidebarOrder().join("|") === `${PATH_PLAIN}|${PATH_SPACES}`,
+      sidebarOrder().join("|"),
+    );
+
+    const grab = centreOf(firstRow);
+    const past = secondRow.getBoundingClientRect().bottom - 2;
+    firstRow.dispatchEvent(pointerAt("pointerdown", grab.x, grab.y));
+    // Two moves: the first crosses the threshold, the second says where.
+    window.dispatchEvent(pointerAt("pointermove", grab.x, grab.y + 12));
+    window.dispatchEvent(pointerAt("pointermove", grab.x, past));
+    await sleep(120);
+    check(
+      "the row it will land under is marked while dragging",
+      Boolean(document.querySelector(".project-item.reorder-after")),
+    );
+    check("the row being dragged is marked too", Boolean(document.querySelector(".reorder-source")));
+
+    window.dispatchEvent(pointerAt("pointerup", grab.x, past));
+    // The click that follows the release must not be read as choosing a project.
+    firstRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await sleep(300);
+    check(
+      "dragging a project past the next one reorders the list",
+      sidebarOrder().join("|") === `${PATH_SPACES}|${PATH_PLAIN}`,
+      sidebarOrder().join("|"),
+    );
+    check(
+      "the drag did not also select the project it dragged",
+      useWorkspace.getState().activeProjectId === idPlain,
+      `active=${useWorkspace.getState().activeProjectId}`,
+    );
+    check("reordering keeps the shell process alive", await shellIsSameProcess(panePlain));
+
+    // Put it back, so the rest of the run sees the order it expects.
+    useWorkspace.getState().moveProject(idPlain, 0);
+    await sleep(200);
+    check(
+      "the order can be put back",
+      sidebarOrder().join("|") === `${PATH_PLAIN}|${PATH_SPACES}`,
+      sidebarOrder().join("|"),
+    );
+    // Saved order is the whole point of reordering; a session-only one is a toy.
+    await sleep(900);
+    const orderOnDisk = await loadState()
+      .then((raw) => (raw ? (JSON.parse(raw) as { projects?: { path: string }[] }) : null))
+      .catch(() => null);
+    check(
+      "the project order is written to state.json",
+      orderOnDisk?.projects?.map((project) => project.path).join("|") ===
+        `${PATH_PLAIN}|${PATH_SPACES}`,
+      JSON.stringify(orderOnDisk?.projects?.map((project) => project.path)),
+    );
+  }
+
   useWorkspace.getState().openCli(idPlain, "shell");
   await sleep(2600);
   const afterSplit = panesOf(idPlain);
@@ -524,10 +630,78 @@ export async function runHarness(mode = "1"): Promise<void> {
     getEntry(panePlain)?.term.options.fontSize === 19,
     `term=${getEntry(panePlain)?.term.options.fontSize}`,
   );
+  /*
+   * --- 설정: the sliders and the saved pair moved into a dialog of their own ---
+   *
+   * They are opened the way a user opens them, because the button is the part
+   * that can go missing: the store reachable from here would keep working with
+   * nothing on screen at all.
+   */
+  const settingsButton = document.querySelector<HTMLButtonElement>(".settings-open");
+  check("the right panel offers a settings button", Boolean(settingsButton));
+  settingsButton?.click();
+  await sleep(350);
+  check("the settings dialog opens", Boolean(document.querySelector(".settings-dialog")));
+  check(
+    "the size sliders live in the dialog now",
+    Boolean(document.querySelector(".settings-dialog .scale-control")),
+  );
   check(
     "apply button reports it is already applied",
     Boolean(document.querySelector(".mysize-apply:disabled")),
   );
+
+  // --- the right-button setting, chosen the way it is chosen ---
+  const prefButton = (label: string) =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".pref-choice button")).find(
+      (button) => (button.textContent ?? "").includes(label),
+    ) ?? null;
+  const pasteChoice = prefButton("바로 붙여넣기");
+  const menuChoice = prefButton("메뉴 표시");
+  check("both right-click choices are offered", Boolean(pasteChoice && menuChoice));
+  pasteChoice?.click();
+  await sleep(200);
+  check(
+    "choosing 바로 붙여넣기 reaches the store",
+    useWorkspace.getState().prefs.rightClick === "paste",
+    useWorkspace.getState().prefs.rightClick,
+  );
+  check(
+    "the chosen side is the one that looks chosen",
+    (document.querySelector(".pref-choice button.pref-on")?.textContent ?? "").includes(
+      "바로 붙여넣기",
+    ),
+  );
+  menuChoice?.click();
+  await sleep(200);
+  check(
+    "and it can be put back",
+    useWorkspace.getState().prefs.rightClick === "menu",
+    useWorkspace.getState().prefs.rightClick,
+  );
+
+  const watchToggle = document.querySelector<HTMLInputElement>(".pref-toggle input");
+  check("folder watching can be turned off", Boolean(watchToggle));
+  check(
+    "folder watching is on out of the box",
+    watchToggle?.checked === true && useWorkspace.getState().prefs.watchFolders,
+  );
+
+  // A setting that does not survive the app is not a setting.
+  await sleep(900);
+  const prefsOnDisk = await loadState()
+    .then((raw) => (raw ? (JSON.parse(raw) as { prefs?: { rightClick?: string } }) : null))
+    .catch(() => null);
+  check(
+    "settings are written to state.json",
+    prefsOnDisk?.prefs?.rightClick === "menu",
+    JSON.stringify(prefsOnDisk?.prefs),
+  );
+
+  (document.querySelector(".settings-close") as HTMLButtonElement | null)?.click();
+  await sleep(250);
+  check("the dialog closes again", !document.querySelector(".settings-dialog"));
+
   // The saved pair must reach disk, or it is not a setting — it is a session quirk.
   await sleep(900);
   const onDisk = await loadState()
@@ -855,50 +1029,66 @@ export async function runHarness(mode = "1"): Promise<void> {
   /*
    * --- dragging a row out of the folder tree ---
    *
-   * A drag that starts inside the app is an ordinary HTML5 one, so unlike the
-   * Explorer drops above it can be dispatched end to end here: the tree row
-   * really is the source and the pane's own handler really is the target.
+   * This is a pointer drag, not an HTML5 one. 0.5.0 built it on `dragstart` and
+   * `drop`, and it passed here while being dead in the real app: `dragDropEnabled`
+   * gives Tauri's native file-drop handler the webview's whole drag pipeline on
+   * Windows, so those events never fire. Pointer events nothing intercepts can be
+   * dispatched end to end, which is what happens below.
    */
-  const treeRow = document.querySelector<HTMLElement>(".tree-row[data-path]");
-  check("the folder tree has rows on screen", Boolean(treeRow));
-  if (treeRow) {
-    check("a tree row can be picked up", treeRow.draggable);
-    const carried = new DataTransfer();
-    treeRow.dispatchEvent(
-      new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: carried }),
-    );
+  const dragRow =
+    treeRows().find((row) => (row.dataset.path ?? "").endsWith("\\package.json")) ?? null;
+  check("the folder tree has a row to drag", Boolean(dragRow));
+  if (dragRow && host) {
+    const draggedPath = dragRow.dataset.path ?? "";
+    const from = centreOf(dragRow);
+    const to = centreOf(host);
+
+    dragRow.dispatchEvent(pointerAt("pointerdown", from.x, from.y));
+    // The first move crosses the threshold, the second says where it landed.
+    window.dispatchEvent(pointerAt("pointermove", from.x - 24, from.y));
+    window.dispatchEvent(pointerAt("pointermove", to.x, to.y));
+    await sleep(150);
     check(
-      "dragging a row carries that row's own path",
-      carried.getData(PATH_MIME) === treeRow.dataset.path,
-      `carried=${carried.getData(PATH_MIME)} row=${treeRow.dataset.path}`,
+      "the dragged row is carried under the pointer",
+      (document.querySelector(".drag-ghost")?.textContent ?? "") === "package.json",
+      document.querySelector(".drag-ghost")?.textContent ?? "no label",
     );
-  }
+    check("the pane under the pointer is marked as the target", host.classList.contains("drop-active"));
 
-  if (host) {
-    // A different path from the Explorer drop above, so a leftover line on the
-    // screen cannot pass this check for it.
-    const draggedPath = `${PATH_SPACES}\\release`;
-    const transfer = new DataTransfer();
-    transfer.setData(PATH_MIME, draggedPath);
-
-    host.dispatchEvent(
-      new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer }),
-    );
-    check("a path dragged over a pane marks it as the target", host.classList.contains("drop-active"));
-
-    host.dispatchEvent(
-      new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }),
-    );
+    window.dispatchEvent(pointerAt("pointerup", to.x, to.y));
     await sleep(900);
     check(
-      "dropping it on the pane types the path, quoted",
-      screen(panePlain).includes(`"${draggedPath}"`),
-      `want="${draggedPath}"`,
+      "dropping it on the pane types that row's own path",
+      screen(panePlain).includes(draggedPath),
+      `want=${draggedPath}`,
     );
+    check("the label is gone once it is dropped", !document.querySelector(".drag-ghost"));
     check("the target mark is cleared after the drop", !host.classList.contains("drop-active"));
+    check(
+      "the pane it was dropped on is the focused one",
+      useWorkspace.getState().focusedPane[idPlain] === panePlain,
+      `focused=${useWorkspace.getState().focusedPane[idPlain]}`,
+    );
+    // Nothing was executed and nothing should be: clear the line the drop typed.
     await writeSession(panePlain, "\x1b");
-    await sleep(500);
+    await sleep(600);
   }
+
+  /*
+   * --- the folder list follows the disk on its own ---
+   *
+   * The file is made by the shell inside the pane, not by this code. That is the
+   * whole point: a change the app was never told about still has to arrive.
+   */
+  const probeName = `.icecmd-watch-${MARK.toLowerCase()}.tmp`;
+  const treeHasProbe = () => treeRows().some((row) => (row.dataset.path ?? "").endsWith(probeName));
+  check("the probe file is not in the tree to begin with", !treeHasProbe());
+  await writeSession(panePlain, `echo probe>${probeName}\r`);
+  await sleep(2000);
+  check("a file made outside the app appears without a refresh", treeHasProbe());
+  await writeSession(panePlain, `del ${probeName}\r`);
+  await sleep(2000);
+  check("and it leaves again when it is deleted", !treeHasProbe());
 
   /*
    * --- the Hangul IME must not deliver a syllable twice ---
@@ -993,15 +1183,69 @@ export async function runHarness(mode = "1"): Promise<void> {
    * into a live shell, and a trailing newline in it would run as a command.
    */
   if (host) {
+    /*
+     * xterm.js only fills whole rows, so a strip shorter than one row is left
+     * over at the bottom and the library's own stylesheet paints it `#000` —
+     * a black band under the terminal, in an app whose terminal is #1e1e1e.
+     */
+    const viewport = host.querySelector<HTMLElement>(".xterm-viewport");
+    const viewportBg = viewport ? getComputedStyle(viewport).backgroundColor : "";
+    check(
+      "the strip under the last row is not the library's black",
+      Boolean(viewport) && viewportBg !== "rgb(0, 0, 0)",
+      viewportBg || "no viewport",
+    );
+
+    /*
+     * The right button must not reach xterm.js at all. A TUI that asked for
+     * mouse reporting gets button 2 forwarded to it, and one that pastes on
+     * that press pastes *as well as* this app — one click, two pastes.
+     */
+    const inner = host.querySelector<HTMLElement>(".xterm-screen");
+    check("the terminal's own element is there to shield", Boolean(inner));
+    if (inner) {
+      let reached = false;
+      const spy = () => {
+        reached = true;
+      };
+      inner.addEventListener("mousedown", spy);
+      const rightDown = new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+      });
+      inner.dispatchEvent(rightDown);
+      inner.removeEventListener("mousedown", spy);
+      check("a right-button press never reaches the terminal", !reached && rightDown.defaultPrevented);
+
+      // The left button has to keep working, or selection and focus die with it.
+      let leftReached = false;
+      const leftSpy = () => {
+        leftReached = true;
+      };
+      inner.addEventListener("mousedown", leftSpy);
+      inner.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      inner.removeEventListener("mousedown", leftSpy);
+      check("the left button still gets through", leftReached);
+    }
+
     rightClick(host);
     await sleep(300);
-    check("a terminal with no selection offers paste only", menuLabels() === "붙여넣기", menuLabels());
+    check(
+      "a terminal with no selection offers everything but copy",
+      menuLabels() === "붙여넣기|모두 선택|화면 지우기",
+      menuLabels(),
+    );
     await dismissMenu();
 
     getEntry(panePlain)?.term.selectAll();
     rightClick(host);
     await sleep(300);
-    check("a selection adds copy to the menu", menuLabels() === "복사|붙여넣기", menuLabels());
+    check(
+      "a selection adds copy to the menu",
+      menuLabels() === "복사|붙여넣기|모두 선택|화면 지우기",
+      menuLabels(),
+    );
 
     /*
      * The Clipboard API refuses to run while the document is unfocused, and
@@ -1045,6 +1289,62 @@ export async function runHarness(mode = "1"): Promise<void> {
       }
     }
     getEntry(panePlain)?.term.clearSelection();
+    await dismissMenu();
+
+    /*
+     * --- the other right-button setting: paste, with no menu at all ---
+     *
+     * This one *does* press paste, so the clipboard is loaded with a harmless
+     * token first and put back afterwards. When the window has no focus the
+     * Clipboard API refuses both, and then the only thing that can be asserted
+     * is the part that matters most anyway: no menu appeared.
+     */
+    useWorkspace.getState().setPrefs({ rightClick: "paste" });
+    await sleep(200);
+    const token = `${MARK}-rmb`;
+    /*
+     * Guarded by the same `focused` as the copy check above, and not merely
+     * because the call would fail: in WebView2 an unfocused `readText()` never
+     * settles at all — it neither resolves nor rejects, and the run stops there.
+     * Awaiting it unguarded hung this harness for ten minutes.
+     */
+    const heldClipboard = focused ? await navigator.clipboard.readText().catch(() => null) : null;
+    const armed = focused
+      ? await navigator.clipboard
+          .writeText(token)
+          .then(() => true)
+          .catch(() => false)
+      : false;
+
+    rightClick(host);
+    await sleep(800);
+    check(
+      "with 바로 붙여넣기 chosen, right-click puts up no menu",
+      !document.querySelector(".context-menu"),
+    );
+    if (armed) {
+      check(
+        "and the clipboard really lands in the shell",
+        screen(panePlain).includes(token),
+        `token=${token}`,
+      );
+      // Never executed: the line the paste typed is cleared before moving on.
+      await writeSession(panePlain, "\x1b");
+      await sleep(400);
+      if (heldClipboard !== null) {
+        await navigator.clipboard.writeText(heldClipboard).catch(() => {});
+      }
+    } else {
+      await logLine(
+        "harness SKIP right-click paste reaches the shell — the window could not take " +
+          "focus, and the Clipboard API refuses to run unfocused",
+      );
+    }
+    useWorkspace.getState().setPrefs({ rightClick: "menu" });
+    await sleep(200);
+    rightClick(host);
+    await sleep(300);
+    check("with 메뉴 표시 chosen, the menu is back", Boolean(document.querySelector(".context-menu")));
     await dismissMenu();
   }
 

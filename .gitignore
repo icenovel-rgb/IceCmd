@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# 폴더 감시 검사가 셸로 만들었다 지우는 파일. 하네스가 중간에 죽으면 남는다.
+.icecmd-watch-*.tmp
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

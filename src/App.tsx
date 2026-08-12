@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { SessionExit } from "./types";
 import { DEFAULT_UI, useWorkspace } from "./store/workspace";
@@ -31,6 +31,19 @@ export default function App() {
   const addProject = useWorkspace((s) => s.addProject);
 
   useShortcuts();
+
+  /*
+   * Stages are drawn in a fixed order, not in the sidebar's order.
+   *
+   * Only one stage is ever visible, so their order on screen means nothing — but
+   * reordering keyed children makes React move the DOM nodes, and a pane's node
+   * carries a live terminal. Sorting by id keeps every node exactly where it was
+   * while the sidebar list is being dragged about.
+   */
+  const stages = useMemo(
+    () => [...projects].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+    [projects],
+  );
 
   // With no terminal on screen there is nothing else the middle could mean, so
   // a folder dropped there joins the sidebar. Once panes exist they own their
@@ -140,7 +153,7 @@ export default function App() {
           ref={workspaceRef}
           className={`workspace${workspaceDrop ? " drop-active" : ""}`}
         >
-          {projects.map((project) => {
+          {stages.map((project) => {
             const layout = layouts[project.id];
             const isActive = project.id === activeProjectId;
             return (

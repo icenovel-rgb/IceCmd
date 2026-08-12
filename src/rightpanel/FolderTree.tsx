@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import type { FsEntry } from "../types";
-import { openInFileManager, openPath, readDir, revealPath } from "../terminal/ipc";
-import { startPathDrag } from "../terminal/pathDrag";
+import { openInFileManager, openPath, readDir, revealPath, watchDirs } from "../terminal/ipc";
+import { beginPathDrag } from "../terminal/pathDrag";
 import { useWorkspace } from "../store/workspace";
 import ContextMenu from "../chrome/ContextMenu";
 
@@ -17,7 +18,17 @@ interface Menu {
   isDir: boolean;
 }
 
-/** Children are fetched on expand and cached; nothing is watched, so idle cost is zero. */
+/**
+ * Windows compares paths case-insensitively, and the watcher can answer with a
+ * different case (or a trailing separator) than the tree asked with.
+ */
+const sameDirKey = (path: string) => path.replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").toLowerCase();
+
+/**
+ * Children are fetched on expand and cached. Folders that are actually on screen
+ * are watched, so the list follows the disk without a refresh; nothing else is,
+ * and the watch can be turned off entirely in 설정.
+ */
 export default function FolderTree({ projectId, rootPath }: Props) {
   const [children, setChildren] = useState<Record<string, FsEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -25,11 +36,18 @@ export default function FolderTree({ projectId, rootPath }: Props) {
   const [menu, setMenu] = useState<Menu | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const openCli = useWorkspace((s) => s.openCli);
+  const watchFolders = useWorkspace((s) => s.prefs.watchFolders);
 
   const load = useCallback(async (path: string) => {
     try {
       const entries = await readDir(path);
       setChildren((prev) => ({ ...prev, [path]: entries }));
+      setFailed((prev) => {
+        if (!prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
     } catch {
       setFailed((prev) => new Set(prev).add(path));
     }
@@ -49,11 +67,38 @@ export default function FolderTree({ projectId, rootPath }: Props) {
         next.delete(path);
       } else {
         next.add(path);
-        if (!children[path]) void load(path);
+        // Always re-read on the way open. A folder that was collapsed was not
+        // being watched, so its cached listing is exactly the one that can be wrong.
+        void load(path);
       }
       return next;
     });
   };
+
+  /** The folders whose rows a user can actually see right now. */
+  const visible = useMemo(() => [rootPath, ...expanded], [rootPath, expanded]);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+
+  useEffect(() => {
+    void watchDirs(watchFolders ? visible : []).catch(() => {});
+  }, [visible, watchFolders]);
+
+  // Only on unmount — leaving the tree must not leave watches running behind it.
+  useEffect(() => () => void watchDirs([]).catch(() => {}), []);
+
+  useEffect(() => {
+    if (!watchFolders) return;
+    const pending = listen<string[]>("fs-changed", (event) => {
+      const changed = new Set(event.payload.map(sameDirKey));
+      for (const dir of visibleRef.current) {
+        if (changed.has(sameDirKey(dir))) void load(dir);
+      }
+    });
+    return () => {
+      void pending.then((unlisten) => unlisten());
+    };
+  }, [watchFolders, load]);
 
   const menuEntries = (target: Menu) =>
     target.isDir
@@ -91,11 +136,22 @@ export default function FolderTree({ projectId, rootPath }: Props) {
             // from the label and depth, and get it wrong.
             data-path={childPath}
             style={{ paddingLeft: 6 + depth * 12 }}
-            // Dragging a row onto a terminal types its path there, the same way
-            // dragging in from Explorer does.
-            draggable
-            onDragStart={(event) => startPathDrag(event, childPath)}
-            onClick={() => entry.isDir && toggle(childPath)}
+            /*
+             * Dragging a row onto a terminal types its path there. Pointer
+             * events, not HTML5 drag: Tauri owns the webview's drag pipeline on
+             * Windows and `dragstart` never fires. The click that expands a
+             * folder is the same gesture, so it is handed to the same helper —
+             * whichever it turns out to be is decided on release.
+             */
+            onPointerDown={(event) =>
+              beginPathDrag(event, {
+                path: childPath,
+                label: entry.name,
+                onTap: () => {
+                  if (entry.isDir) toggle(childPath);
+                },
+              })
+            }
             // A folder row opens in Explorer on double-click; single click still
             // expands, so the two gestures do not fight.
             onDoubleClick={() => {
@@ -148,7 +204,13 @@ export default function FolderTree({ projectId, rootPath }: Props) {
               />
             </svg>
           </button>
-          <button type="button" title="새로 읽기" onClick={() => void load(rootPath)}>
+          <button
+            type="button"
+            title={watchFolders ? "새로 읽기 (바뀌면 저절로 갱신됩니다)" : "새로 읽기"}
+            onClick={() => {
+              for (const dir of visible) void load(dir);
+            }}
+          >
             ⟳
           </button>
         </span>

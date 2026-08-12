@@ -1,6 +1,6 @@
 [package]
 name = "icecmd"
-version = "0.5.0"
+version = "0.6.0"
 description = "Lightweight terminal project manager"
 authors = ["iceno"]
 license = "MIT"
@@ -24,6 +24,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 portable-pty = "0.9.0"
 parking_lot = "0.12.5"
+# Folder watching for the tree. The OS pushes changes (ReadDirectoryChangesW on
+# Windows, FSEvents on macOS), so an idle app polls nothing.
+notify = "8"
 
 # Smaller, faster binary. `panic = "abort"` is deliberately omitted: a panic in
 # one PTY thread must not take down every other session.

@@ -39,6 +39,27 @@ export interface SavedSizes {
   uiScale: number;
 }
 
+/**
+ * What the right mouse button does over a terminal.
+ *
+ * Two honest answers exist and terminals disagree about which is right, so it is
+ * a setting rather than a guess: `menu` shows this app's own copy/paste menu,
+ * `paste` behaves like a console with QuickEdit on and pastes straight away.
+ */
+export type RightClickAction = "menu" | "paste";
+
+/** Behaviour the user picks in 설정, kept apart from the sizes above. */
+export interface AppPrefs {
+  rightClick: RightClickAction;
+  /** Redraw folder rows when the folder changes on disk, without a refresh. */
+  watchFolders: boolean;
+}
+
+export const DEFAULT_PREFS: AppPrefs = {
+  rightClick: "menu",
+  watchFolders: true,
+};
+
 export const UI_LIMITS = {
   sidebar: { min: 140, max: 460 },
   rightPanel: { min: 180, max: 520 },
@@ -78,12 +99,15 @@ interface WorkspaceState {
   focusedPane: Record<string, string | undefined>;
   status: Record<string, PaneStatus>;
   ui: UiPrefs;
+  prefs: AppPrefs;
   /** null until the user saves one. */
   mySizes: SavedSizes | null;
   hydrated: boolean;
 
   addProject: (path: string, name: string) => string | null;
   removeProject: (projectId: string) => void;
+  /** Drag-reorder in the sidebar. `toIndex` is a slot in the *current* list. */
+  moveProject: (projectId: string, toIndex: number) => void;
   setActiveProject: (projectId: string) => void;
   setFocusedPane: (projectId: string, paneId: string) => void;
 
@@ -105,6 +129,7 @@ interface WorkspaceState {
   saveMySizes: () => void;
   applyMySizes: () => void;
   clearMySizes: () => void;
+  setPrefs: (patch: Partial<AppPrefs>) => void;
   replaceAll: (snapshot: WorkspaceSnapshot) => void;
 }
 
@@ -114,6 +139,7 @@ export interface WorkspaceSnapshot {
   panes: Record<string, PaneMeta>;
   activeProjectId: string | null;
   ui: UiPrefs;
+  prefs: AppPrefs;
   mySizes: SavedSizes | null;
 }
 
@@ -130,6 +156,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   focusedPane: {},
   status: {},
   ui: DEFAULT_UI,
+  prefs: DEFAULT_PREFS,
   mySizes: null,
   hydrated: false,
 
@@ -171,6 +198,23 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       return { projects, layouts, panes, focusedPane, status, activeProjectId };
     });
   },
+
+  /*
+   * Only the sidebar's order changes. Nothing else reads the array's order —
+   * `App` draws the stages in a fixed order of its own — so a reorder can never
+   * move a pane's DOM node and disturb the shell living in it.
+   */
+  moveProject: (projectId, toIndex) =>
+    set((state) => {
+      const from = state.projects.findIndex((project) => project.id === projectId);
+      if (from < 0) return state;
+      const target = Math.min(Math.max(toIndex, 0), state.projects.length - 1);
+      if (target === from) return state;
+      const projects = [...state.projects];
+      const [moved] = projects.splice(from, 1);
+      projects.splice(target, 0, moved);
+      return { projects };
+    }),
 
   setActiveProject: (projectId) => set({ activeProjectId: projectId }),
 
@@ -323,6 +367,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   clearMySizes: () => set({ mySizes: null }),
 
+  setPrefs: (patch) => set((state) => ({ prefs: { ...state.prefs, ...patch } })),
+
   replaceAll: (snapshot) =>
     set({
       projects: snapshot.projects,
@@ -330,6 +376,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       panes: snapshot.panes,
       activeProjectId: snapshot.activeProjectId,
       ui: snapshot.ui,
+      prefs: snapshot.prefs,
       mySizes: snapshot.mySizes,
       focusedPane: {},
       status: {},

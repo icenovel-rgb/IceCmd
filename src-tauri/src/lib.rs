@@ -3,14 +3,17 @@ mod fs_tree;
 mod persist;
 mod pty;
 mod usage;
+mod watch;
 
 use pty::SessionManager;
 use tauri::Manager;
+use watch::DirWatch;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(SessionManager::new())
+        .manage(DirWatch::new())
         .invoke_handler(tauri::generate_handler![
             commands::create_session,
             commands::write_session,
@@ -25,6 +28,7 @@ pub fn run() {
             commands::reveal_path,
             fs_tree::read_dir,
             fs_tree::path_info,
+            watch::watch_dirs,
             persist::load_state,
             persist::save_state,
             usage::cli_usage,

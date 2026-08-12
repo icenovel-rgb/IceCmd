@@ -6,9 +6,11 @@ import type { PaneNode, Project, SessionKind } from "../types";
 import { loadState, pathInfo, saveState } from "../terminal/ipc";
 import { paneIds } from "../layout/tree";
 import {
+  DEFAULT_PREFS,
   DEFAULT_UI,
   UI_LIMITS,
   useWorkspace,
+  type AppPrefs,
   type PaneMeta,
   type SavedSizes,
   type UiPrefs,
@@ -25,7 +27,18 @@ interface Stored {
   panes: Record<string, PaneMeta>;
   activeProjectId: string | null;
   ui?: UiPrefs;
+  prefs?: AppPrefs;
   mySizes?: SavedSizes | null;
+}
+
+/** Written by older builds, or by hand. Anything unrecognised falls back. */
+function readPrefs(stored: AppPrefs | undefined): AppPrefs {
+  if (!stored) return DEFAULT_PREFS;
+  return {
+    rightClick: stored.rightClick === "paste" ? "paste" : DEFAULT_PREFS.rightClick,
+    watchFolders:
+      typeof stored.watchFolders === "boolean" ? stored.watchFolders : DEFAULT_PREFS.watchFolders,
+  };
 }
 
 /** Older state files predate `ui`, and a hand-edited one may hold nonsense. */
@@ -148,6 +161,7 @@ export async function hydrate(): Promise<void> {
     panes,
     activeProjectId,
     ui: readUi(parsed.ui),
+    prefs: readPrefs(parsed.prefs),
     mySizes: readMySizes(parsed.mySizes),
   };
   useWorkspace.getState().replaceAll(snapshot);
@@ -166,6 +180,7 @@ export function startAutoSave(): () => void {
       state.panes === previous.panes &&
       state.activeProjectId === previous.activeProjectId &&
       state.ui === previous.ui &&
+      state.prefs === previous.prefs &&
       state.mySizes === previous.mySizes;
     if (unchanged) return;
 
@@ -180,6 +195,7 @@ export function startAutoSave(): () => void {
         panes: current.panes,
         activeProjectId: current.activeProjectId,
         ui: current.ui,
+        prefs: current.prefs,
         mySizes: current.mySizes,
       };
       void saveState(JSON.stringify(stored)).catch(() => {});
