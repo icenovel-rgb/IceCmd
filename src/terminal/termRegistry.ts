@@ -36,7 +36,14 @@ export interface TermEntry {
   sentRows: number;
   /** Set once the pane is torn down so late callbacks do nothing. */
   disposed: boolean;
-  /** Latest PTY output time, used for the busy indicator. */
+  /**
+   * Latest PTY output time, used for the busy indicator.
+   *
+   * `-Infinity` until the first byte arrives, so "has produced nothing yet" is
+   * never mistaken for "produced something just now" — with 0 here, every pane
+   * reported busy for the first couple of seconds after launch, because
+   * `performance.now()` is small then and the gap looked recent.
+   */
   lastOutputAt: number;
   /** Set while the cursor is held solid because output is still arriving. */
   blinkHeld: boolean;
@@ -96,7 +103,7 @@ export function createEntry(paneId: string, fontSize: number): TermEntry {
     sentCols: 0,
     sentRows: 0,
     disposed: false,
-    lastOutputAt: 0,
+    lastOutputAt: Number.NEGATIVE_INFINITY,
     blinkHeld: false,
     blinkTimer: null,
     attention: false,
@@ -111,6 +118,23 @@ export const getEntry = (paneId: string) => entries.get(paneId);
 export const allEntries = () => Array.from(entries.values());
 
 /**
+ * Redraws every row, whether or not xterm thinks anything changed.
+ *
+ * xterm only paints rows it believes are dirty, which is right almost always and
+ * wrong in exactly the cases where the canvas is empty *and it does not know*:
+ * a renderer that has just been swapped in has drawn nothing yet, and a window
+ * that was minimised or covered comes back with its GPU surface thrown away.
+ * The screen then shows only the rows that happened to be rewritten since —
+ * usually just the prompt at the bottom — and scrolling appears to "fix" it,
+ * because scrolling is what finally marks every row dirty. This is that, on
+ * purpose, at the moments where it is needed.
+ */
+export function repaint(entry: TermEntry): void {
+  if (entry.disposed) return;
+  entry.term.refresh(0, entry.term.rows - 1);
+}
+
+/**
  * The GPU renderer is the cheapest option per frame, but browsers cap live WebGL
  * contexts, so only visible panes get one.
  */
@@ -121,9 +145,14 @@ export function attachWebgl(entry: TermEntry): void {
     addon.onContextLoss(() => {
       addon.dispose();
       entry.webgl = null;
+      // Back on the DOM renderer, which has drawn nothing of what is on screen.
+      repaint(entry);
     });
     entry.term.loadAddon(addon);
     entry.webgl = addon;
+    // A brand-new canvas holds nothing; without this the pane stays blank until
+    // something else dirties its rows.
+    repaint(entry);
   } catch {
     // Falls back to the DOM renderer; nothing else to do.
     entry.webgl = null;

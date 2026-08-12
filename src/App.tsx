@@ -15,6 +15,7 @@ import {
   attachWebgl,
   detachWebgl,
   getEntry,
+  repaint,
   syncSize,
 } from "./terminal/termRegistry";
 import { markExited, startStatusMonitor, stopStatusMonitor } from "./terminal/status";
@@ -115,6 +116,27 @@ export default function App() {
     applyFontSize(ui.fontSize);
   }, [ui.fontSize]);
 
+  /*
+   * A window that was minimised or covered comes back with its canvases empty:
+   * WebView2 throws the GPU surface away and xterm is never told, so the terminal
+   * shows only whatever has been rewritten since — the prompt at the bottom, and
+   * nothing above it until you scroll. Coming back is the moment to redraw.
+   */
+  useEffect(() => {
+    const repaintVisible = () => {
+      const { panes, activeProjectId: active } = useWorkspace.getState();
+      for (const entry of allEntries()) {
+        if (panes[entry.paneId]?.projectId === active) repaint(entry);
+      }
+    };
+    window.addEventListener("focus", repaintVisible);
+    document.addEventListener("visibilitychange", repaintVisible);
+    return () => {
+      window.removeEventListener("focus", repaintVisible);
+      document.removeEventListener("visibilitychange", repaintVisible);
+    };
+  }, []);
+
   // Hidden panes keep their scrollback but give up their WebGL context: browsers
   // cap live contexts, and nothing offscreen is being painted anyway.
   useEffect(() => {
@@ -126,6 +148,10 @@ export default function App() {
         if (meta.projectId === activeProjectId) {
           attachWebgl(entry);
           syncSize(entry);
+          // syncSize only tells the PTY when the grid actually changed, and an
+          // unchanged grid means no repaint — so a pane coming back on screen
+          // would keep whatever the renderer last drew, which may be nothing.
+          repaint(entry);
         } else {
           detachWebgl(entry);
         }

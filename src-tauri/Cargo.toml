@@ -1,6 +1,6 @@
 [package]
 name = "icecmd"
-version = "0.6.0"
+version = "0.6.1"
 description = "Lightweight terminal project manager"
 authors = ["iceno"]
 license = "MIT"

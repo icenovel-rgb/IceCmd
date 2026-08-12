@@ -30,16 +30,39 @@ export function stopStatusMonitor(): void {
   timer = null;
 }
 
+/**
+ * Whether being on this project counts as having seen its bell.
+ *
+ * It does when the window is in front: the pane is on screen and whatever rang is
+ * right there. It does not when the app is behind something else — the taskbar
+ * will not say which project wanted you, so the bell has to wait.
+ */
+export const bellIsSeen = (isActiveProject: boolean, windowFocused: boolean): boolean =>
+  isActiveProject && windowFocused;
+
 function tick(): void {
-  const { projects, panes, setStatus } = useWorkspace.getState();
+  const { projects, panes, activeProjectId, setStatus } = useWorkspace.getState();
   if (projects.length === 0) return;
 
   const rollup = new Map<string, PaneStatus>(projects.map((p) => [p.id, "idle"]));
   const now = performance.now();
+  const windowFocused = document.hasFocus();
 
   for (const entry of allEntries()) {
     const meta = panes[entry.paneId];
     if (!meta || !rollup.has(meta.projectId)) continue;
+
+    /*
+     * Clearing the bell used to happen in one place only — clicking the project
+     * row in the sidebar. So a bell rung on the project you were *already*
+     * looking at could never be cleared: there was no row left to click. And
+     * because attention outranks busy, one such bell pinned the indicator for the
+     * rest of the session and the "working" spinner never appeared again.
+     */
+    if (bellIsSeen(meta.projectId === activeProjectId, windowFocused)) {
+      entry.attention = false;
+    }
+
     const paneStatus: PaneStatus = entry.attention
       ? "attention"
       : !entry.exited && now - entry.lastOutputAt < BUSY_WINDOW_MS

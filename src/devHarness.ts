@@ -28,7 +28,7 @@ import {
   writeSession,
 } from "./terminal/ipc";
 import { getEntry } from "./terminal/termRegistry";
-import { clearAttention } from "./terminal/status";
+import { bellIsSeen, clearAttention } from "./terminal/status";
 import { dropTextFor } from "./terminal/dropText";
 import { handleDropPayload, type DroppedPath } from "./sidebar/dnd";
 import { checkForUpdate, currentVersion, isNewer } from "./update";
@@ -840,6 +840,114 @@ export async function runHarness(mode = "1"): Promise<void> {
   const cleared = useWorkspace.getState().status[idPlain];
   check("looking at the project clears attention", cleared !== "attention", `status=${cleared}`);
   useWorkspace.getState().setActiveProject(idPlain);
+
+  /*
+   * --- the bell rung on the project you are already looking at ---
+   *
+   * Clearing it used to happen in one place: pressing the project's row in the
+   * sidebar. On the project already on screen there is no row left to press, so
+   * that bell could never be cleared — and since attention outranks busy, one of
+   * them pinned the indicator for the rest of the session and the working spinner
+   * never came back. The check above missed it by ringing the bell on the *other*
+   * project and then calling `clearAttention` by hand.
+   */
+  check("bellIsSeen: on screen, with the window in front", bellIsSeen(true, true));
+  check("bellIsSeen: not while the app is behind something", !bellIsSeen(true, false));
+  check("bellIsSeen: never for a project you are not on", !bellIsSeen(false, true));
+
+  /*
+   * Both halves are driven by standing in for `document.hasFocus()` — the one
+   * part of this rule that belongs to the browser rather than to this app. A run
+   * started in the background cannot bring its own window to the front (Windows
+   * refuses, and `AppActivate` reports success while changing nothing), so
+   * without the stand-in the half that matters most could only ever be skipped —
+   * and it is the half every user meets.
+   */
+  const realHasFocus = document.hasFocus.bind(document);
+  const pretendFocus = (focused: boolean) => {
+    document.hasFocus = () => focused;
+  };
+  const statusNow = () => useWorkspace.getState().status[idPlain];
+
+  pretendFocus(false);
+  getEntry(panePlain)?.term.write("\x07");
+  await sleep(1600);
+  check("a bell waits while the window is not in front", statusNow() === "attention", `status=${statusNow()}`);
+
+  pretendFocus(true);
+  await sleep(1600);
+  check(
+    "a bell on the project you are looking at clears itself",
+    statusNow() !== "attention",
+    `status=${statusNow()}`,
+  );
+
+  // The symptom itself: before this, one bell pinned the indicator for good and
+  // the working spinner never appeared again.
+  await writeSession(panePlain, `echo ${MARK}-again\r`);
+  await sleep(1300);
+  check(
+    "the working spinner comes back after a bell has been seen",
+    statusNow() === "busy",
+    `status=${statusNow()}`,
+  );
+
+  document.hasFocus = realHasFocus;
+  clearAttention(idPlain);
+  await sleep(1300);
+
+  // A pane that has produced nothing has not started working — it has just started.
+  const freshEntry = getEntry(panePlain);
+  if (freshEntry) {
+    const outputAt = freshEntry.lastOutputAt;
+    freshEntry.lastOutputAt = Number.NEGATIVE_INFINITY;
+    await sleep(1400);
+    const quiet = useWorkspace.getState().status[idPlain];
+    check("a pane that has never produced output is not reported as working", quiet === "idle", `status=${quiet}`);
+    freshEntry.lastOutputAt = outputAt;
+  }
+
+  /*
+   * --- a pane that comes back on screen is redrawn in full ---
+   *
+   * xterm paints only the rows it believes changed, and a renderer that was just
+   * swapped in — or a canvas whose GPU surface was thrown away while the window
+   * was hidden — has painted none of them. The symptom is a terminal showing only
+   * its last line until you scroll. What can be asserted from here is that the
+   * full redraw is issued; that the pixels arrive is for a person to see.
+   */
+  const paintTerm = getEntry(panePlain)?.term;
+  check("the pane's terminal is reachable for the redraw check", Boolean(paintTerm));
+  if (paintTerm) {
+    let repaints = 0;
+    const realRefresh = paintTerm.refresh.bind(paintTerm);
+    paintTerm.refresh = (start: number, end: number) => {
+      repaints += 1;
+      realRefresh(start, end);
+    };
+
+    useWorkspace.getState().setActiveProject(idSpaces);
+    await sleep(500);
+    const afterLeaving = repaints;
+    useWorkspace.getState().setActiveProject(idPlain);
+    await sleep(800);
+    check(
+      "coming back to a project redraws its panes",
+      repaints > afterLeaving,
+      `redraws=${repaints - afterLeaving}`,
+    );
+
+    const beforeFocus = repaints;
+    window.dispatchEvent(new Event("focus"));
+    await sleep(300);
+    check(
+      "getting the window back redraws them too",
+      repaints > beforeFocus,
+      `redraws=${repaints - beforeFocus}`,
+    );
+
+    paintTerm.refresh = realRefresh;
+  }
 
   /*
    * --- the context menu, pressed the way a hand presses it ---
