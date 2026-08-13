@@ -152,10 +152,19 @@ export default function FolderTree({ projectId, rootPath }: Props) {
                 },
               })
             }
-            // A folder row opens in Explorer on double-click; single click still
-            // expands, so the two gestures do not fight.
+            /*
+             * Double-click opens a file, and only a file.
+             *
+             * A folder used to open in Explorer on double-click, on top of the
+             * single click that expands it — so the gesture that browses the
+             * tree and the gesture that throws a window onto the screen were the
+             * same gesture, told apart by how fast it was done. Two quick clicks
+             * down the tree opened Explorer nobody asked for. Opening a folder is
+             * now on the right-click menu, where it has to be meant. A file has
+             * no expand to collide with, so it keeps the fast way in.
+             */
             onDoubleClick={() => {
-              if (entry.isDir) void openInFileManager(childPath).catch(() => {});
+              if (!entry.isDir) void openPath(childPath).catch(() => {});
             }}
             onContextMenu={(event) => {
               event.preventDefault();
@@ -168,8 +177,8 @@ export default function FolderTree({ projectId, rootPath }: Props) {
             }}
             title={
               entry.isDir
-                ? "클릭: 펼치기 · 더블클릭: 탐색기에서 열기 · 끌어서 터미널에 놓으면 경로 입력"
-                : `${entry.name} · 끌어서 터미널에 놓으면 경로 입력`
+                ? "클릭: 펼치기 · 우클릭: 탐색기에서 열기 · 끌어서 터미널에 놓으면 경로 입력"
+                : `${entry.name} · 더블클릭: 열기 · 끌어서 터미널에 놓으면 경로 입력`
             }
           >
             <span className="tree-caret">{entry.isDir ? (isOpen ? "▾" : "▸") : ""}</span>

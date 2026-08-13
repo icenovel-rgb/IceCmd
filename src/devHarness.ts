@@ -732,11 +732,31 @@ export async function runHarness(mode = "1"): Promise<void> {
   check("the disk probe answers with a byte count", /^\d+$/.test(devState), `answer=${devState}`);
   check("dev build writes its own state file", devState !== "0", `state.dev.json=${devState}B`);
 
+  /*
+   * Byte-equality was the wrong question, and it took until 0.6.2 to notice.
+   *
+   * This app is developed inside itself: the installed IceCmd is nearly always
+   * open while the harness runs, and it saves its own state whenever a pane is
+   * moved. So the file legitimately changes under the run, and the check failed
+   * for a reason that had nothing to do with what it tests — the same trap as
+   * everything else in this file.
+   *
+   * What must never happen is what actually happened in 2026-08-09: the dev
+   * build clearing or replacing it. Cleared shows up as 0, and replaced shows up
+   * as the dev build's own snapshot — which, after cleanup, holds no projects at
+   * all and is an order of magnitude smaller than a real one.
+   */
   const installedStateAfter = await askShell(panePlain, sizeProbe("state.json"));
+  const detail = `state.json ${installedStateBefore}B -> ${installedStateAfter}B, state.dev.json=${devState}B`;
   check(
-    "installed app's state.json untouched by this run",
-    /^\d+$/.test(installedStateAfter) && installedStateAfter === installedStateBefore,
-    `before=${installedStateBefore}B after=${installedStateAfter}B`,
+    "the dev build did not clear the installed app's state",
+    /^[1-9]\d*$/.test(installedStateAfter),
+    detail,
+  );
+  check(
+    "the dev build did not replace it with its own snapshot",
+    installedStateAfter !== devState,
+    detail,
   );
 
   const backup = await askShell(panePlain, sizeProbe("state.dev.json.bak"));
@@ -1259,7 +1279,7 @@ export async function runHarness(mode = "1"): Promise<void> {
    * checked as carefully as the value: an unstamped reading would be presented
    * as current when it might be days old.
    */
-  const usage = await cliUsage().catch(() => null);
+  const usage = await cliUsage(false).catch(() => null);
   check("cli_usage answers", usage !== null);
   if (usage) {
     const tools = [usage.claude, usage.codex].filter((tool): tool is ToolUsage => Boolean(tool));
@@ -1282,6 +1302,70 @@ export async function runHarness(mode = "1"): Promise<void> {
       stamps.every((stamp) => stamp > 1.7e12 && stamp < Date.now() + 60_000),
       JSON.stringify(stamps),
     );
+  }
+
+  /*
+   * The live reading is the answer to "the bar only moves after I type /usage".
+   * It is allowed to be unavailable — no network, no token, a macOS keychain —
+   * because it falls back to the cache. What it must never be is *older* than
+   * the cache it was asked to improve on.
+   */
+  const liveUsage = await cliUsage(true).catch(() => null);
+  check("cli_usage answers with 실시간 갱신 on", liveUsage !== null);
+  if (liveUsage && usage) {
+    const stampOf = (claude: ToolUsage | null | undefined) => claude?.measuredAtMs ?? 0;
+    check(
+      "the live reading is never staler than the cached one",
+      stampOf(liveUsage.claude) >= stampOf(usage.claude),
+      `live=${stampOf(liveUsage.claude)} cached=${stampOf(usage.claude)}`,
+    );
+  }
+
+  /*
+   * --- colour actually reaches the child ---
+   *
+   * "on that PC everything comes out black and white" is not a colour being
+   * wrong, it is a CLI deciding to emit no colour at all, and what it decides on
+   * is the environment it was handed. So the environment is read back from
+   * inside the shell rather than trusted where it was set: the store holding
+   * `forceColor` proves nothing about what the process got.
+   */
+  const colourEnvOf = async (paneId: string) => {
+    await writeSession(paneId, `echo ${MARK}-col[%TERM%][%COLORTERM%][%FORCE_COLOR%]\r`);
+    await sleep(700);
+    return screen(paneId);
+  };
+
+  const plainColour = await colourEnvOf(panePlain);
+  check(
+    "a shell is told which terminal it is talking to",
+    plainColour.includes(`${MARK}-col[xterm-256color][truecolor]`),
+    plainColour.slice(-160),
+  );
+  check(
+    "a plain shell is not forced by default",
+    !plainColour.includes(`${MARK}-col[xterm-256color][truecolor][3]`),
+  );
+
+  {
+    const restore = useWorkspace.getState().prefs.forceColor;
+    useWorkspace.getState().setPrefs({ forceColor: true });
+    const before = panesOf(idPlain);
+    useWorkspace.getState().openCli(idPlain, "shell");
+    await sleep(3000);
+    const forced = panesOf(idPlain).find((id) => !before.includes(id)) ?? "";
+    check("the switch opens a shell to test with", Boolean(forced));
+    if (forced) {
+      const forcedColour = await colourEnvOf(forced);
+      check(
+        "with the switch on, a new shell is handed FORCE_COLOR",
+        forcedColour.includes(`${MARK}-col[xterm-256color][truecolor][3]`),
+        forcedColour.slice(-160),
+      );
+      useWorkspace.getState().closePane(forced);
+      await sleep(800);
+    }
+    useWorkspace.getState().setPrefs({ forceColor: restore });
   }
 
   /*

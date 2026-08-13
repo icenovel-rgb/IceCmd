@@ -1,14 +1,18 @@
 /**
  * Plan usage for claude and codex, along the bottom of the window.
  *
- * Both numbers come from caches the CLIs write themselves (see `usage.rs`), so
- * they are exact but only as fresh as the last time that CLI ran. That is why
- * every reading shows how old it is instead of pretending to be live — a number
- * that silently stops moving is worse than one that says it has stopped.
+ * codex writes its allowance into every session log it keeps, so its number is
+ * as fresh as its last turn for free. claude only refreshes its cache when it
+ * has a reason to, so with 실시간 갱신 on, that reading is taken from the source
+ * instead once the cached one goes stale (see `usage.rs`).
+ *
+ * Either way each reading still shows how old it is rather than pretending to be
+ * live — a number that silently stops moving is worse than one that says so.
  */
 import { useEffect, useState } from "react";
 import type { CliUsage, ToolUsage, UsageWindow } from "../types";
 import { cliUsage } from "../terminal/ipc";
+import { useWorkspace } from "../store/workspace";
 
 /** Slow enough to be free, often enough to follow a session as it burns down. */
 const POLL_MS = 30_000;
@@ -70,11 +74,15 @@ function Tool({ name, usage }: { name: string; usage: ToolUsage | null }) {
 
 export default function UsageBar() {
   const [usage, setUsage] = useState<CliUsage | null>(null);
+  const liveUsage = useWorkspace((s) => s.prefs.liveUsage);
 
   useEffect(() => {
     let stopped = false;
     const read = () => {
-      void cliUsage()
+      // Nothing on screen can be stale while the window is hidden, and a live
+      // reading costs a request. Coming back re-reads immediately, below.
+      if (document.hidden) return;
+      void cliUsage(liveUsage)
         .then((next) => {
           if (!stopped) setUsage(next);
         })
@@ -86,12 +94,14 @@ export default function UsageBar() {
     const timer = window.setInterval(read, POLL_MS);
     // Coming back to the window is exactly when a stale number is most visible.
     window.addEventListener("focus", read);
+    document.addEventListener("visibilitychange", read);
     return () => {
       stopped = true;
       window.clearInterval(timer);
       window.removeEventListener("focus", read);
+      document.removeEventListener("visibilitychange", read);
     };
-  }, []);
+  }, [liveUsage]);
 
   return (
     <div className="usage-bar">

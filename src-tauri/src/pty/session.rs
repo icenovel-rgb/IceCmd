@@ -85,6 +85,8 @@ pub struct SpawnConfig {
     pub kind: String,
     pub cols: u16,
     pub rows: u16,
+    /// Force colour on for a plain shell as well. CLI panes force it regardless.
+    pub force_color: bool,
 }
 
 pub fn spawn(
@@ -102,7 +104,7 @@ pub fn spawn(
         .openpty(size)
         .map_err(|e| format!("openpty failed: {e}"))?;
 
-    let command = spawn::build(&cfg.kind, &cfg.cwd);
+    let command = spawn::build(&cfg.kind, &cfg.cwd, cfg.force_color);
     let mut child = pair
         .slave
         .spawn_command(command)

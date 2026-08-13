@@ -20,6 +20,8 @@ export interface CreateSessionOptions {
   kind: SessionKind;
   cols: number;
   rows: number;
+  /** Force colour on for a plain shell too; CLI panes force it either way. */
+  forceColor: boolean;
 }
 
 /**
@@ -82,5 +84,11 @@ export const openPath = (path: string) => invoke<void>("open_path", { path });
 /** Shows a file in the file manager with it selected. */
 export const revealPath = (path: string) => invoke<void>("reveal_path", { path });
 
-/** Plan usage for the logged-in CLIs, read from the caches they keep on disk. */
-export const cliUsage = () => invoke<CliUsage>("cli_usage");
+/**
+ * Plan usage for the logged-in CLIs.
+ *
+ * `live` lets the claude reading be taken from its source when the CLI's own
+ * cache has gone stale; without it, both readings come only from the caches the
+ * CLIs keep on disk.
+ */
+export const cliUsage = (live: boolean) => invoke<CliUsage>("cli_usage", { live });

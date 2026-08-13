@@ -82,6 +82,41 @@ export default function SettingsModal({ onClose }: Props) {
           </p>
         </section>
 
+        <section className="settings-section">
+          <h3>터미널 색</h3>
+          <label className="pref-toggle">
+            <input
+              type="checkbox"
+              checked={prefs.forceColor}
+              onChange={(event) => setPrefs({ forceColor: event.target.checked })}
+            />
+            <span>셸에서도 색을 강제로 켜기</span>
+          </label>
+          <p className="pref-note">
+            claude·codex 창은 언제나 켜져 있습니다. 이 스위치는 셸에서 직접 CLI를 띄웠을 때
+            글자가 흑백으로만 나오는 PC를 위한 것입니다. 켜면 그 셸에서 파일로 넘긴 출력에도
+            색 코드가 섞이므로, 필요한 기계에서만 켜세요. 새로 여는 창부터 적용됩니다.
+          </p>
+        </section>
+
+        <section className="settings-section">
+          <h3>사용량 표시</h3>
+          <label className="pref-toggle">
+            <input
+              type="checkbox"
+              checked={prefs.liveUsage}
+              onChange={(event) => setPrefs({ liveUsage: event.target.checked })}
+            />
+            <span>claude 사용량을 직접 확인하기</span>
+          </label>
+          <p className="pref-note">
+            claude는 <code>/usage</code>를 열어볼 때만 자기 기록을 갱신합니다. 켜 두면 그 기록이
+            낡았을 때만 IceCmd가 대신 확인합니다 — 창이 보일 때만, 90초에 한 번, 2KB. 토큰은
+            claude가 저장해 둔 것을 읽어 api.anthropic.com 한 곳에만 보내고 어디에도 남기지
+            않습니다. 끄면 예전처럼 claude가 남긴 기록만 읽습니다.
+          </p>
+        </section>
+
         <button type="button" className="settings-close" onClick={onClose}>
           닫기
         </button>

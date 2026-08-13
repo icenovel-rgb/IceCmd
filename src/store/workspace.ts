@@ -53,11 +53,24 @@ export interface AppPrefs {
   rightClick: RightClickAction;
   /** Redraw folder rows when the folder changes on disk, without a refresh. */
   watchFolders: boolean;
+  /**
+   * Tell plain shells to emit colour instead of letting them work it out.
+   * CLI panes are told regardless; this is for the machine where a CLI started
+   * by hand from a shell pane comes out in black and white.
+   */
+  forceColor: boolean;
+  /**
+   * Take the claude reading from its source rather than from the cache the CLI
+   * only refreshes when it feels like it.
+   */
+  liveUsage: boolean;
 }
 
 export const DEFAULT_PREFS: AppPrefs = {
   rightClick: "menu",
   watchFolders: true,
+  forceColor: false,
+  liveUsage: true,
 };
 
 export const UI_LIMITS = {

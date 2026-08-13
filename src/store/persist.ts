@@ -38,6 +38,10 @@ function readPrefs(stored: AppPrefs | undefined): AppPrefs {
     rightClick: stored.rightClick === "paste" ? "paste" : DEFAULT_PREFS.rightClick,
     watchFolders:
       typeof stored.watchFolders === "boolean" ? stored.watchFolders : DEFAULT_PREFS.watchFolders,
+    forceColor:
+      typeof stored.forceColor === "boolean" ? stored.forceColor : DEFAULT_PREFS.forceColor,
+    liveUsage:
+      typeof stored.liveUsage === "boolean" ? stored.liveUsage : DEFAULT_PREFS.liveUsage,
   };
 }
 

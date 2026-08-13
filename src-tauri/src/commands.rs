@@ -13,6 +13,9 @@ pub struct CreateSessionArgs {
     pub kind: String,
     pub cols: u16,
     pub rows: u16,
+    /// Absent in state written by an older build; off is the old behaviour.
+    #[serde(default)]
+    pub force_color: bool,
 }
 
 #[tauri::command]
@@ -31,6 +34,7 @@ pub fn create_session(
             kind: args.kind,
             cols: args.cols,
             rows: args.rows,
+            force_color: args.force_color,
         },
         on_data,
     )?;

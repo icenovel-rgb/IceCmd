@@ -75,7 +75,17 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
     entry.sentCols = entry.term.cols;
     entry.sentRows = entry.term.rows;
     void createSession(
-      { sessionId: paneId, cwd, kind, cols: entry.term.cols, rows: entry.term.rows },
+      {
+        sessionId: paneId,
+        cwd,
+        kind,
+        cols: entry.term.cols,
+        rows: entry.term.rows,
+        // Read here rather than subscribed to: the child's environment is fixed
+        // at spawn, so making this a dependency would kill and respawn a live
+        // shell the moment the switch was flipped.
+        forceColor: useWorkspace.getState().prefs.forceColor,
+      },
       (chunk) => writeOutput(entry, chunk),
     );
 

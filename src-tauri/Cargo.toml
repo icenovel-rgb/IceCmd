@@ -1,6 +1,6 @@
 [package]
 name = "icecmd"
-version = "0.6.1"
+version = "0.6.2"
 description = "Lightweight terminal project manager"
 authors = ["iceno"]
 license = "MIT"
@@ -27,6 +27,11 @@ parking_lot = "0.12.5"
 # Folder watching for the tree. The OS pushes changes (ReadDirectoryChangesW on
 # Windows, FSEvents on macOS), so an idle app polls nothing.
 notify = "8"
+# One request, one endpoint: claude's usage reading, taken at most once every 90
+# seconds and only while the window is open. Blocking and tiny on purpose — a
+# full async client would pull hyper and tokio's whole stack in behind it for
+# two kilobytes of JSON.
+ureq = { version = "2", default-features = false, features = ["tls"] }
 
 # Smaller, faster binary. `panic = "abort"` is deliberately omitted: a panic in
 # one PTY thread must not take down every other session.

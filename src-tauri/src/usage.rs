@@ -23,6 +23,18 @@ const ROLLOUT_TAIL: u64 = 1024 * 1024;
 /// Sessions are filed by day; a resumed one can land in an older folder.
 const ROLLOUT_DAYS: usize = 4;
 
+/// The endpoint claude's own `/usage` reads, and the header that lets an OAuth
+/// token address it.
+const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+const OAUTH_BETA: &str = "oauth-2025-04-20";
+/// Floor between two live readings, and the age at which the file's own reading
+/// stops being good enough. One request is about two kilobytes, so this is
+/// roughly a megabyte a day with the window open all day — but only while it is
+/// actually open (see `UsageBar`).
+const LIVE_INTERVAL_MS: i64 = 90_000;
+/// A reading that cannot be taken must not be re-attempted on every poll.
+const LIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Window {
@@ -63,6 +75,9 @@ struct Memo<K> {
 
 /// Keyed on the config file's modified time.
 static CLAUDE_MEMO: Mutex<Option<Memo<i64>>> = Mutex::new(None);
+/// The last live reading and when it was attempted — a failure is remembered
+/// too, so being offline costs one request per interval rather than one per poll.
+static LIVE_MEMO: Mutex<Option<Live>> = Mutex::new(None);
 /// Keyed on the newest rollout and its modified time — a new session means a
 /// new path, more turns in the same session means a new time.
 static CODEX_MEMO: Mutex<Option<Memo<(PathBuf, i64)>>> = Mutex::new(None);
@@ -90,20 +105,41 @@ fn memoized<K: PartialEq>(
     value
 }
 
+struct Live {
+    attempted_at_ms: i64,
+    value: Option<ToolUsage>,
+}
+
 /// Reads both tools. A tool that is not installed, not logged in, or has simply
 /// never written a reading comes back as `None` rather than as an error: one
 /// missing CLI must not hide the other.
 ///
-/// `async` so Tauri keeps it off the main thread. It is a few file reads, but
-/// one of them is a megabyte of session log, and the main thread is where
-/// `create_session` is answered — a terminal must never wait on a status line.
+/// `live` allows the claude reading to be taken from the source rather than from
+/// the CLI's cache; see `claude_usage`.
+///
+/// Off the async workers entirely: this is blocking file work, one read is a
+/// megabyte of session log, and with `live` it can reach the network. The main
+/// thread is where `create_session` is answered — a terminal must never wait on
+/// a status line.
 #[tauri::command]
-pub async fn cli_usage(app: AppHandle) -> CliUsage {
+pub async fn cli_usage(app: AppHandle, live: bool) -> CliUsage {
     let home = app.path().home_dir().ok();
-    CliUsage {
-        claude: home.as_deref().and_then(claude_usage),
+    tauri::async_runtime::spawn_blocking(move || CliUsage {
+        claude: home.as_deref().and_then(|home| claude_usage(home, live)),
         codex: home.as_deref().and_then(codex_usage),
-    }
+    })
+    .await
+    .unwrap_or(CliUsage {
+        claude: None,
+        codex: None,
+    })
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 fn modified_ms(path: &Path) -> Option<i64> {
@@ -160,9 +196,94 @@ fn window_from(value: &Value) -> Option<Window> {
     })
 }
 
-fn claude_usage(home: &Path) -> Option<ToolUsage> {
+/// claude writes `cachedUsageUtilization` when it has a reason to — at startup,
+/// and when the user opens `/usage`. In between it does not, so a long session
+/// can spend a third of its window while the file still says what it said hours
+/// ago. The bar was honest about that ("2시간 전") and honestly useless.
+///
+/// With `live`, the reading is instead taken from the endpoint the CLI itself
+/// reads, using the token the CLI already stored. Everything about it is a
+/// fallback: no token, an expired one (refreshing is the CLI's business, not
+/// ours), no network, an answer that does not parse — each of those quietly
+/// leaves the file's reading in place, which is exactly what 0.6.1 showed.
+fn claude_usage(home: &Path, live: bool) -> Option<ToolUsage> {
     let path = home.join(".claude.json");
-    memoized(&CLAUDE_MEMO, modified_ms(&path)?, || read_claude(&path))
+    let cached = modified_ms(&path).and_then(|key| memoized(&CLAUDE_MEMO, key, || read_claude(&path)));
+    if !live {
+        return cached;
+    }
+
+    // When the CLI has just refreshed its own cache, that is the same number for
+    // free — the request would only confirm it.
+    let fresh_enough = cached
+        .as_ref()
+        .and_then(|usage| usage.measured_at_ms)
+        .is_some_and(|at| now_ms() - at < LIVE_INTERVAL_MS);
+    if fresh_enough {
+        return cached;
+    }
+
+    live_claude(home).or(cached)
+}
+
+/// One request per `LIVE_INTERVAL_MS` at most, whatever the caller does.
+fn live_claude(home: &Path) -> Option<ToolUsage> {
+    if let Some(held) = LIVE_MEMO.lock().as_ref() {
+        if now_ms() - held.attempted_at_ms < LIVE_INTERVAL_MS {
+            return held.value.clone();
+        }
+    }
+
+    let value = claude_token(home).and_then(|token| fetch_claude(&token));
+    *LIVE_MEMO.lock() = Some(Live {
+        attempted_at_ms: now_ms(),
+        value: value.clone(),
+    });
+    value
+}
+
+/// The access token claude stored, if it is still valid.
+///
+/// Windows and Linux keep it in a file. macOS keeps it in the Keychain, so this
+/// finds nothing there and the file reading stands — which is the same answer
+/// 0.6.1 gave, not a worse one.
+fn claude_token(home: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(home.join(".claude").join(".credentials.json")).ok()?;
+    let oauth = serde_json::from_str::<Value>(&raw)
+        .ok()?
+        .get("claudeAiOauth")?
+        .clone();
+    if oauth.get("expiresAt").and_then(Value::as_i64)? <= now_ms() {
+        return None;
+    }
+    Some(oauth.get("accessToken")?.as_str()?.to_owned())
+}
+
+/// The token goes to api.anthropic.com and nowhere else, and nothing about the
+/// answer is written to disk.
+fn fetch_claude(token: &str) -> Option<ToolUsage> {
+    let body = ureq::get(CLAUDE_USAGE_URL)
+        .timeout(LIVE_TIMEOUT)
+        .set("authorization", &format!("Bearer {token}"))
+        .set("anthropic-beta", OAUTH_BETA)
+        .set("user-agent", concat!("IceCmd/", env!("CARGO_PKG_VERSION")))
+        .call()
+        .ok()?
+        .into_string()
+        .ok()?;
+
+    // The endpoint answers with the same object the CLI files under
+    // `utilization`, so the two readings are the same shape by construction.
+    let value: Value = serde_json::from_str(&body).ok()?;
+    let usage = ToolUsage {
+        session: value.get("five_hour").and_then(window_from),
+        weekly: value.get("seven_day").and_then(window_from),
+        plan: None,
+        measured_at_ms: Some(now_ms()),
+    };
+    // An answer with neither window in it is not a reading; falling back to the
+    // file beats showing an empty row.
+    (usage.session.is_some() || usage.weekly.is_some()).then_some(usage)
 }
 
 fn read_claude(path: &Path) -> Option<ToolUsage> {
