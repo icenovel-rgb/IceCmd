@@ -8,6 +8,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { guardImeInput } from "./ime";
 import { ackOutput, resizeSession } from "./ipc";
+import { isWindows } from "../platform";
 
 /** Ack early enough that the reader never hits its high-water mark. */
 const ACK_THRESHOLD = 128 * 1024;
@@ -75,7 +76,10 @@ export function createEntry(paneId: string, fontSize: number): TermEntry {
     cursorBlink: true,
     // Required by the unicode11 addon.
     allowProposedApi: true,
-    windowsPty: { backend: "conpty" },
+    // ConPTY는 줄을 접을 때 스스로 개행을 끼워 넣는다. xterm은 이 옵션을 보고
+    // 그 개행을 되돌려 붙이는데, 유닉스 pty는 그런 짓을 하지 않으므로 맥에서
+    // 켜 두면 멀쩡한 줄바꿈까지 이어 붙여 화면이 어긋난다.
+    ...(isWindows ? { windowsPty: { backend: "conpty" as const } } : {}),
     // Mirrors --terminal-bg / --text / --accent-hi from styles.css.
     theme: {
       background: "#1e1e1e",
