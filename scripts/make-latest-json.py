@@ -14,9 +14,12 @@ icenovel.com 서비스 페이지의 다운로드 카드용 latest.json 생성 �
     python deploy.py plan
     python deploy.py push --approved-by "<실제 지시>"
 
-다운로드 URL은 버전이 붙지 않은 별칭(IceCmd-Setup-x64.exe)을 우선한다. 그래야 사용자가
-페이지를 캐시해 두었더라도 항상 최신 설치 파일을 받는다. 별칭이 없으면 버전이 붙은 자산으로
-떨어진다.
+다운로드 URL은 버전이 붙지 않은 별칭(IceCmd-Setup-x64.exe, IceCmd-universal.dmg)을 우선한다.
+그래야 사용자가 페이지를 캐시해 두었더라도 항상 최신 설치 파일을 받는다. 별칭이 없으면 버전이
+붙은 자산으로 떨어진다.
+
+윈도와 맥 두 칸을 모두 채운다. 릴리스 워크플로의 두 잡이 따로 끝나므로, 한쪽 자산이 아직
+없으면 만들지 않고 죽는다 — 반쪽짜리 latest.json 을 배포하는 것보다 낫다.
 """
 from __future__ import annotations
 
@@ -29,7 +32,11 @@ API = "https://api.github.com/repos/icenovel-rgb/IceCmd/releases/latest"
 DEFAULT_WRITE = (
     "D:/Naver MYBOX/11. Business/icenovel.com/web/public/download/icecmd/latest.json"
 )
-STABLE_ALIAS = "icecmd-setup-x64.exe"
+# 플랫폼마다 어떤 자산이 그 플랫폼의 설치 파일인지와, 버전이 붙지 않은 별칭 이름.
+PLATFORMS = {
+    "win": (".exe", "icecmd-setup-x64.exe"),
+    "mac": (".dmg", "icecmd-universal.dmg"),
+}
 
 
 def fetch_release() -> dict:
@@ -64,25 +71,24 @@ def build(release: dict) -> dict:
     date = (release.get("published_at") or "")[:10]
     notes = first_line(release.get("body") or "")
 
-    windows_assets = [a for a in release.get("assets", []) if a["name"].lower().endswith(".exe")]
-    if not windows_assets:
-        raise SystemExit(f"v{version}: no .exe asset yet (CI may still be building)")
-
-    # 버전 없는 별칭이 있으면 그것을 쓴다.
-    chosen = next(
-        (a for a in windows_assets if a["name"].lower() == STABLE_ALIAS), windows_assets[0]
-    )
-    return {
-        "win": {
+    assets = release.get("assets", [])
+    result = {}
+    for key, (suffix, alias) in PLATFORMS.items():
+        matches = [a for a in assets if a["name"].lower().endswith(suffix)]
+        if not matches:
+            # 두 잡이 따로 끝나므로 한쪽만 올라온 순간이 실제로 있다. 그때
+            # 만든 파일을 배포하면 한 플랫폼의 다운로드가 조용히 사라진다.
+            raise SystemExit(f"v{version}: no {suffix} asset yet (CI may still be building)")
+        # 버전 없는 별칭이 있으면 그것을 쓴다.
+        chosen = next((a for a in matches if a["name"].lower() == alias), matches[0])
+        result[key] = {
             "version": version,
             "url": chosen["browser_download_url"],
             "size_bytes": chosen["size"],
             "date": date,
             "notes": notes,
-        },
-        # 맥 빌드가 나오면 .dmg 자산을 찾아 여기에 채운다.
-        "mac": None,
-    }
+        }
+    return result
 
 
 def main() -> None:
@@ -112,7 +118,8 @@ def main() -> None:
     with open(args.write, "w", encoding="utf-8") as handle:
         handle.write(text)
     # 윈도 콘솔은 cp949라 한글을 찍으면 깨진다. 알림은 ASCII로만.
-    print(f"saved: {args.write} (v{data['win']['version']}, {data['win']['size_bytes']} bytes)")
+    sizes = ", ".join(f"{key} {data[key]['size_bytes']} bytes" for key in data)
+    print(f"saved: {args.write} (v{data['win']['version']}, {sizes})")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,8 @@
  * 확인은 앱을 켤 때 한 번만 한다. 실패하면 조용히 넘어간다 — 오프라인인 사람에게
  * 경고를 띄울 이유가 없다.
  */
+import { isMac } from "./platform";
+
 const SITE_URL = "https://icenovel.com/download/icecmd/latest.json";
 const GITHUB_URL = "https://api.github.com/repos/icenovel-rgb/IceCmd/releases/latest";
 export const RELEASES_PAGE = "https://github.com/icenovel-rgb/IceCmd/releases/latest";
@@ -66,12 +68,16 @@ async function getJson(url: string): Promise<unknown> {
 }
 
 function fromSite(payload: unknown): UpdateInfo | null {
-  const win = (payload as { win?: Record<string, unknown> } | null)?.win;
-  if (!win || typeof win.version !== "string") return null;
+  // 같은 파일에 두 플랫폼이 나란히 들어 있다. 맥에서 win 칸을 읽으면 남의
+  // 설치 파일을 받으라고 권하게 되므로 자기 칸만 본다.
+  const entry = (payload as { win?: Record<string, unknown>; mac?: Record<string, unknown> } | null)?.[
+    isMac ? "mac" : "win"
+  ];
+  if (!entry || typeof entry.version !== "string") return null;
   return {
-    version: win.version,
-    downloadUrl: typeof win.url === "string" ? win.url : RELEASES_PAGE,
-    notes: typeof win.notes === "string" ? win.notes : "",
+    version: entry.version,
+    downloadUrl: typeof entry.url === "string" ? entry.url : RELEASES_PAGE,
+    notes: typeof entry.notes === "string" ? entry.notes : "",
   };
 }
 
@@ -82,7 +88,8 @@ function fromGithub(payload: unknown): UpdateInfo | null {
   const tag = release?.tag_name;
   if (typeof tag !== "string") return null;
 
-  const exe = release?.assets?.find((asset) => asset.name?.toLowerCase().endsWith(".exe"));
+  const suffix = isMac ? ".dmg" : ".exe";
+  const installer = release?.assets?.find((asset) => asset.name?.toLowerCase().endsWith(suffix));
   const firstLine = (release?.body ?? "")
     .split("\n")
     .map((line) => line.replace(/^[#>*\-\s]+/, "").trim())
@@ -90,7 +97,7 @@ function fromGithub(payload: unknown): UpdateInfo | null {
 
   return {
     version: tag.replace(/^v/, ""),
-    downloadUrl: exe?.browser_download_url ?? RELEASES_PAGE,
+    downloadUrl: installer?.browser_download_url ?? RELEASES_PAGE,
     notes: firstLine ?? "",
   };
 }

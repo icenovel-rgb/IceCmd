@@ -15,6 +15,10 @@ dist-ssr
 # 폴더 감시 검사가 셸로 만들었다 지우는 파일. 하네스가 중간에 죽으면 남는다.
 .icecmd-watch-*.tmp
 
+# 맥 서명·공증 자격증명. .env.mac.example 만 저장소에 둔다.
+.env.mac
+*.p8
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
