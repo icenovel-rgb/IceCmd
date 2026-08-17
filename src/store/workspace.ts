@@ -110,6 +110,14 @@ interface WorkspaceState {
   activeProjectId: string | null;
   /** Last focused pane per project, so switching back restores focus. */
   focusedPane: Record<string, string | undefined>;
+  /**
+   * Folder-tree rows the user has opened, per project.
+   *
+   * Kept here rather than in the tree component because the component is remounted
+   * on every project change: local state would put the tree back to just its root
+   * each time, which is exactly what it used to do.
+   */
+  expandedFolders: Record<string, string[]>;
   status: Record<string, PaneStatus>;
   ui: UiPrefs;
   prefs: AppPrefs;
@@ -123,6 +131,8 @@ interface WorkspaceState {
   moveProject: (projectId: string, toIndex: number) => void;
   setActiveProject: (projectId: string) => void;
   setFocusedPane: (projectId: string, paneId: string) => void;
+  /** Opens a folder row if it is closed, closes it if it is open. */
+  toggleFolder: (projectId: string, path: string) => void;
 
   splitPaneWith: (paneId: string, dir: SplitDir, kind: SessionKind) => void;
   /** `cwd` defaults to the project folder; the folder tree passes a subfolder. */
@@ -151,6 +161,7 @@ export interface WorkspaceSnapshot {
   layouts: Record<string, PaneNode | null>;
   panes: Record<string, PaneMeta>;
   activeProjectId: string | null;
+  expandedFolders: Record<string, string[]>;
   ui: UiPrefs;
   prefs: AppPrefs;
   mySizes: SavedSizes | null;
@@ -167,6 +178,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   panes: {},
   activeProjectId: null,
   focusedPane: {},
+  expandedFolders: {},
   status: {},
   ui: DEFAULT_UI,
   prefs: DEFAULT_PREFS,
@@ -203,12 +215,21 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       const projects = state.projects.filter((p) => p.id !== projectId);
       const { [projectId]: _layout, ...layouts } = state.layouts;
       const { [projectId]: _focus, ...focusedPane } = state.focusedPane;
+      const { [projectId]: _open, ...expandedFolders } = state.expandedFolders;
       const { [projectId]: _status, ...status } = state.status;
       const activeProjectId =
         state.activeProjectId === projectId
           ? (projects[0]?.id ?? null)
           : state.activeProjectId;
-      return { projects, layouts, panes, focusedPane, status, activeProjectId };
+      return {
+        projects,
+        layouts,
+        panes,
+        focusedPane,
+        expandedFolders,
+        status,
+        activeProjectId,
+      };
     });
   },
 
@@ -237,6 +258,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         ? state
         : { focusedPane: { ...state.focusedPane, [projectId]: paneId } },
     ),
+
+  toggleFolder: (projectId, path) =>
+    set((state) => {
+      const open = state.expandedFolders[projectId] ?? [];
+      const next = open.includes(path)
+        ? open.filter((candidate) => candidate !== path)
+        : [...open, path];
+      return { expandedFolders: { ...state.expandedFolders, [projectId]: next } };
+    }),
 
   splitPaneWith: (paneId, dir, kind) => {
     const meta = get().panes[paneId];
@@ -388,6 +418,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       layouts: snapshot.layouts,
       panes: snapshot.panes,
       activeProjectId: snapshot.activeProjectId,
+      expandedFolders: snapshot.expandedFolders,
       ui: snapshot.ui,
       prefs: snapshot.prefs,
       mySizes: snapshot.mySizes,

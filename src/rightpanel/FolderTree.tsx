@@ -24,6 +24,9 @@ interface Menu {
  */
 const sameDirKey = (path: string) => path.replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").toLowerCase();
 
+/** One frozen empty list, so a project with nothing open keeps a stable selector result. */
+const NOTHING_OPEN: string[] = [];
+
 /**
  * Children are fetched on expand and cached. Folders that are actually on screen
  * are watched, so the list follows the disk without a refresh; nothing else is,
@@ -31,12 +34,16 @@ const sameDirKey = (path: string) => path.replace(/^\\\\\?\\/, "").replace(/[\\/
  */
 export default function FolderTree({ projectId, rootPath }: Props) {
   const [children, setChildren] = useState<Record<string, FsEntry[]>>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<Menu | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const openCli = useWorkspace((s) => s.openCli);
   const watchFolders = useWorkspace((s) => s.prefs.watchFolders);
+  // Which rows are open is the store's, not this component's: it is remounted on
+  // every project change, and local state would collapse the tree each time.
+  const openPaths = useWorkspace((s) => s.expandedFolders[projectId] ?? NOTHING_OPEN);
+  const toggleFolder = useWorkspace((s) => s.toggleFolder);
+  const expanded = useMemo(() => new Set(openPaths), [openPaths]);
 
   const load = useCallback(async (path: string) => {
     try {
@@ -53,30 +60,31 @@ export default function FolderTree({ projectId, rootPath }: Props) {
     }
   }, []);
 
+  /*
+   * Listings start empty for a new root; the open rows do not, so a project comes
+   * back looking the way it was left. Every folder that is already open has to be
+   * fetched here — nothing else is going to, and its rows would sit on "…" forever.
+   * Read once, from the store rather than from `openPaths`, so that opening a
+   * folder later does not re-run this and wipe the listings it just fetched.
+   */
   useEffect(() => {
     setChildren({});
-    setExpanded(new Set());
     setFailed(new Set());
     void load(rootPath);
-  }, [rootPath, load]);
+    for (const dir of useWorkspace.getState().expandedFolders[projectId] ?? NOTHING_OPEN) {
+      void load(dir);
+    }
+  }, [rootPath, projectId, load]);
 
   const toggle = (path: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-        // Always re-read on the way open. A folder that was collapsed was not
-        // being watched, so its cached listing is exactly the one that can be wrong.
-        void load(path);
-      }
-      return next;
-    });
+    // Always re-read on the way open. A folder that was collapsed was not being
+    // watched, so its cached listing is exactly the one that can be wrong.
+    if (!expanded.has(path)) void load(path);
+    toggleFolder(projectId, path);
   };
 
   /** The folders whose rows a user can actually see right now. */
-  const visible = useMemo(() => [rootPath, ...expanded], [rootPath, expanded]);
+  const visible = useMemo(() => [rootPath, ...openPaths], [rootPath, openPaths]);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
 

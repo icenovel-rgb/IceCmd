@@ -30,7 +30,9 @@ export default function RightPanel() {
       {activeProjectId && project ? (
         <>
           <CliButtons projectId={activeProjectId} />
-          {/* Remounting on project change resets the cached tree, which is what we want. */}
+          {/* Remounting on project change drops the cached listings, which is what we
+              want — they are re-read from disk. Which rows are open lives in the
+              store and survives this, so the tree comes back as it was left. */}
           <FolderTree key={project.path} projectId={activeProjectId} rootPath={project.path} />
         </>
       ) : (

@@ -970,6 +970,115 @@ export async function runHarness(mode = "1"): Promise<void> {
   }
 
   /*
+   * --- leaving a project must not resize the shells it leaves behind ---
+   *
+   * A stage that is not the active one is `display: none`, and a computed style
+   * inside one hands back `.terminal-host`'s `100%` verbatim instead of a resolved
+   * length. FitAddon reads that as 100 *pixels* and proposes roughly ten columns.
+   * That number used to reach the PTY the instant the pane's ResizeObserver fired
+   * on the way out, so claude and codex redrew their whole interface about four
+   * characters wide — and they do it with real newlines and box characters, which
+   * is why coming back could never unwrap it. The narrow banner stayed in the
+   * scrollback for the rest of the session.
+   *
+   * Asserted on the entry rather than on screen: `sentCols` is what the child was
+   * actually told, and that is the thing that must not move.
+   */
+  const leftBehind = getEntry(panePlain);
+  check("the pane is reachable for the hidden-resize check", Boolean(leftBehind));
+  if (leftBehind) {
+    const wideCols = leftBehind.term.cols;
+    const wideSent = leftBehind.sentCols;
+    check("the pane on screen has a real grid to begin with", wideCols > 40, `cols=${wideCols}`);
+
+    useWorkspace.getState().setActiveProject(idSpaces);
+    // Well past the 80 ms resize debounce, so a shrink would have landed by now.
+    await sleep(600);
+    check(
+      "a hidden pane keeps its grid",
+      leftBehind.term.cols === wideCols,
+      `cols=${leftBehind.term.cols} want=${wideCols}`,
+    );
+    check(
+      "a hidden pane's shell is never told a new size",
+      leftBehind.sentCols === wideSent,
+      `sent=${leftBehind.sentCols} want=${wideSent}`,
+    );
+
+    useWorkspace.getState().setActiveProject(idPlain);
+    await sleep(600);
+    check(
+      "coming back leaves the grid wide",
+      leftBehind.term.cols > 40,
+      `cols=${leftBehind.term.cols}`,
+    );
+  }
+
+  /*
+   * --- the folder tree comes back the way it was left ---
+   *
+   * Which rows are open used to be `useState` inside a component the right panel
+   * remounts on every project change, and the mount effect cleared it as well.
+   * Opening a folder, glancing at another project and coming back therefore always
+   * found the tree collapsed back to its root.
+   */
+  const dirRows = () => Array.from(document.querySelectorAll<HTMLElement>(".tree-row.tree-dir"));
+  const openable = dirRows()[0] ?? null;
+  check("the folder tree offers a folder to open", Boolean(openable));
+  if (openable) {
+    const openedPath = openable.dataset.path ?? "";
+    const spot = openable.getBoundingClientRect();
+    // A press that never moves is a tap, and `beginPathDrag` decides that on release.
+    openable.dispatchEvent(pointerAt("pointerdown", spot.left + 4, spot.top + 4));
+    window.dispatchEvent(pointerAt("pointerup", spot.left + 4, spot.top + 4));
+    await sleep(700);
+
+    const rowIsOpen = () =>
+      dirRows().some(
+        (row) =>
+          row.dataset.path === openedPath &&
+          (row.querySelector(".tree-caret")?.textContent ?? "") === "▾",
+      );
+    check("clicking a folder opens it", rowIsOpen(), `path=${openedPath}`);
+    check(
+      "the store is what remembers it, not the component",
+      (useWorkspace.getState().expandedFolders[idPlain] ?? []).includes(openedPath),
+      `open=${(useWorkspace.getState().expandedFolders[idPlain] ?? []).length}`,
+    );
+    const rowsWhileOpen = document.querySelectorAll(".tree-row").length;
+
+    useWorkspace.getState().setActiveProject(idSpaces);
+    await sleep(500);
+    useWorkspace.getState().setActiveProject(idPlain);
+    await sleep(1000);
+
+    check(
+      "a folder left open is still open after visiting another project",
+      rowIsOpen(),
+      `path=${openedPath}`,
+    );
+    // The remount drops the cached listings on purpose, so the rows of a folder
+    // that is already open have to be fetched again — without that they sit on "…".
+    check(
+      "its children are read again rather than left on a placeholder",
+      document.querySelectorAll(".tree-row").length === rowsWhileOpen,
+      `rows=${document.querySelectorAll(".tree-row").length} want=${rowsWhileOpen}`,
+    );
+
+    const savedState = (await loadState().catch(() => "")) ?? "";
+    check(
+      "the open rows reach the state file",
+      savedState.includes("expandedFolders") &&
+        savedState.includes(JSON.stringify(openedPath).slice(1, -1)),
+      `bytes=${savedState.length}`,
+    );
+
+    // Put it back, so the run leaves the tree as it found it.
+    useWorkspace.getState().toggleFolder(idPlain, openedPath);
+    await sleep(300);
+  }
+
+  /*
    * --- the context menu, pressed the way a hand presses it ---
    *
    * Every item in this menu was dead from 0.1.0 through 0.3.0 while 59 checks

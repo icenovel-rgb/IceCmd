@@ -28,6 +28,8 @@ export interface TermEntry {
   term: Terminal;
   fit: FitAddon;
   webgl: WebglAddon | null;
+  /** The element `term.open()` was handed, so a size can be checked before fitting. */
+  host: HTMLElement | null;
   /** Bytes parsed but not yet reported to the backend. */
   pendingAck: number;
   ackTimer: number | null;
@@ -98,6 +100,7 @@ export function createEntry(paneId: string, fontSize: number): TermEntry {
     term,
     fit,
     webgl: null,
+    host: null,
     pendingAck: 0,
     ackTimer: null,
     sentCols: 0,
@@ -166,12 +169,38 @@ export function detachWebgl(entry: TermEntry): void {
 }
 
 /**
+ * Whether the pane has a real box on screen to measure.
+ *
+ * A stage that is not the active one is `display: none`, and a computed style
+ * inside one does not resolve percentages — `.terminal-host` is `100%`, so the
+ * answer comes back as the string "100%", which FitAddon parses as 100 *pixels*
+ * and turns into a grid about ten columns wide. `clientWidth`/`clientHeight` are
+ * 0 for anything that is not laid out, and that is the one answer which cannot
+ * be mistaken for a real measurement.
+ */
+export function isMeasurable(entry: TermEntry): boolean {
+  const host = entry.host;
+  return !!host && host.clientWidth > 0 && host.clientHeight > 0;
+}
+
+/**
  * Refits the terminal and tells the PTY only when the grid actually changed.
  * ConPTY repaints its whole screen on every resize, and a repaint can lose a line
  * of history, so a no-op resize is worth avoiding.
  */
 export function syncSize(entry: TermEntry): void {
   if (entry.disposed) return;
+  /*
+   * Never fit a pane that is not on screen.
+   *
+   * Leaving a project hides its stage, which fires the pane's ResizeObserver, and
+   * fitting there hands the PTY the ten-column guess described above. A shell would
+   * only wrap its next line, but claude and codex repaint their whole interface at
+   * whatever width they are told — and they emit real newlines and box characters
+   * to do it, so there is nothing left for xterm to unwrap when the pane comes back.
+   * The narrow banner then sits in the scrollback for the rest of the session.
+   */
+  if (!isMeasurable(entry)) return;
   entry.fit.fit();
   const { cols, rows } = entry.term;
   if (cols === entry.sentCols && rows === entry.sentRows) return;

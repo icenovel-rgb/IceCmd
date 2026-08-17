@@ -26,9 +26,29 @@ interface Stored {
   layouts: Record<string, PaneNode | null>;
   panes: Record<string, PaneMeta>;
   activeProjectId: string | null;
+  expandedFolders?: Record<string, string[]>;
   ui?: UiPrefs;
   prefs?: AppPrefs;
   mySizes?: SavedSizes | null;
+}
+
+/**
+ * Open folder rows, as last left. Written by older builds without this field, and
+ * editable by hand, so anything unrecognised is dropped rather than trusted.
+ * Projects that no longer exist are dropped with them.
+ */
+function readExpandedFolders(
+  stored: Record<string, string[]> | undefined,
+  keep: Set<string>,
+): Record<string, string[]> {
+  if (!stored || typeof stored !== "object") return {};
+  const open: Record<string, string[]> = {};
+  for (const [projectId, paths] of Object.entries(stored)) {
+    if (!keep.has(projectId) || !Array.isArray(paths)) continue;
+    const valid = paths.filter((path): path is string => typeof path === "string");
+    if (valid.length > 0) open[projectId] = valid;
+  }
+  return open;
 }
 
 /** Written by older builds, or by hand. Anything unrecognised falls back. */
@@ -164,6 +184,7 @@ export async function hydrate(): Promise<void> {
     layouts,
     panes,
     activeProjectId,
+    expandedFolders: readExpandedFolders(parsed.expandedFolders, keep),
     ui: readUi(parsed.ui),
     prefs: readPrefs(parsed.prefs),
     mySizes: readMySizes(parsed.mySizes),
@@ -183,6 +204,7 @@ export function startAutoSave(): () => void {
       state.layouts === previous.layouts &&
       state.panes === previous.panes &&
       state.activeProjectId === previous.activeProjectId &&
+      state.expandedFolders === previous.expandedFolders &&
       state.ui === previous.ui &&
       state.prefs === previous.prefs &&
       state.mySizes === previous.mySizes;
@@ -198,6 +220,7 @@ export function startAutoSave(): () => void {
         layouts: current.layouts,
         panes: current.panes,
         activeProjectId: current.activeProjectId,
+        expandedFolders: current.expandedFolders,
         ui: current.ui,
         prefs: current.prefs,
         mySizes: current.mySizes,

@@ -11,12 +11,26 @@ import {
   createEntry,
   disposeEntry,
   getEntry,
+  isMeasurable,
   syncSize,
   writeOutput,
 } from "./termRegistry";
 
 /** ConPTY repaints the whole screen on resize, so coalesce bursts of them. */
 const RESIZE_DEBOUNCE_MS = 80;
+
+/**
+ * The grid a pane is spawned with when it mounts inside a hidden stage — every
+ * project but the active one, each time the app starts.
+ *
+ * There is nothing to measure there, and measuring anyway yields about ten
+ * columns, which is what the child would then be told it has. An ordinary size
+ * is a better guess than a wrong measurement: the shell comes up readable, and
+ * the first time the pane is actually shown `syncSize` replaces this with the
+ * real thing.
+ */
+const HIDDEN_SPAWN_COLS = 120;
+const HIDDEN_SPAWN_ROWS = 30;
 
 interface Props {
   paneId: string;
@@ -49,8 +63,15 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
 
     const entry = createEntry(paneId, fontSizeRef.current);
     entry.term.open(host);
+    entry.host = host;
     attachWebgl(entry);
-    entry.fit.fit();
+    if (isMeasurable(entry)) {
+      entry.fit.fit();
+    } else {
+      // Resized rather than left at xterm's default so the grid and the PTY agree
+      // on one size; the pane is hidden, so nothing is drawn twice for it.
+      entry.term.resize(HIDDEN_SPAWN_COLS, HIDDEN_SPAWN_ROWS);
+    }
 
     // Wire input before spawning: ConPTY opens with a cursor-position query and
     // stays silent until the terminal answers, and that answer comes through
