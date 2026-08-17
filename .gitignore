@@ -15,6 +15,9 @@ dist-ssr
 # 폴더 감시 검사가 셸로 만들었다 지우는 파일. 하네스가 중간에 죽으면 남는다.
 .icecmd-watch-*.tmp
 
+# scripts/ 의 파이썬을 돌리면 생긴다.
+__pycache__/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

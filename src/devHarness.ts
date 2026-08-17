@@ -811,14 +811,21 @@ export async function runHarness(mode = "1"): Promise<void> {
    * than a hard-coded expectation. Run with ICECMD_FAKE_VERSION=0.1.0 to take the
    * "a newer version exists" branch — the banner path is otherwise only reachable
    * in the window between a release and installing it.
+   *
+   * The offer is the FIRST source that reports something newer, in source order.
+   * Expecting `siteVersion` alone called 0.6.3 correct: the site sat at 0.6.2 because
+   * the release step was forgotten, GitHub knew better, and the app offered nothing.
    */
+  const ghVersion = (gh as { tag_name?: string } | null)?.tag_name?.replace(/^v/, "");
+  const expected = [siteVersion, ghVersion].find(
+    (candidate) => typeof candidate === "string" && isNewer(candidate, currentVersion),
+  );
   const offered = await checkForUpdate();
-  const behind = typeof siteVersion === "string" && isNewer(siteVersion, currentVersion);
-  if (behind) {
+  if (expected) {
     check(
       "newer version is offered when behind",
-      offered?.version === siteVersion,
-      `offered=${offered?.version ?? "none"} site=${siteVersion}`,
+      offered?.version === expected,
+      `offered=${offered?.version ?? "none"} expected=${expected}`,
     );
     check("installer link points at an .exe", Boolean(offered?.downloadUrl.endsWith(".exe")));
     // The banner renders after its own start delay; give it room before looking.
@@ -833,6 +840,15 @@ export async function runHarness(mode = "1"): Promise<void> {
     );
     check("no banner when up to date", !document.querySelector(".update-banner"));
   }
+  /*
+   * The regression itself, stated so it fails rather than goes quiet: whatever the
+   * site says, a newer GitHub release must reach the user.
+   */
+  check(
+    "a stale site does not hide a newer github release",
+    !(typeof ghVersion === "string" && isNewer(ghVersion, currentVersion)) || offered !== null,
+    `gh=${ghVersion ?? "?"} site=${siteVersion ?? "?"} offered=${offered?.version ?? "none"}`,
+  );
   check(
     "footer shows either a version line or an update banner",
     Boolean(document.querySelector(".version-line, .update-banner")),

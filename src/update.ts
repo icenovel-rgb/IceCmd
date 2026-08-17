@@ -3,11 +3,18 @@
  *
  * 정본은 사이트의 `download/icecmd/latest.json`이다 — 릴리스를 낼 때
  * `scripts/make-latest-json.py`가 GitHub 릴리스에서 뽑아 갱신하는 그 파일이고,
- * 다운로드 카드도 같은 것을 읽는다. 한 곳만 보게 두면 카드에 적힌 버전과 앱이
+ * 다운로드 카드도 같은 것을 읽는다. 사이트가 최신이면 카드에 적힌 버전과 앱이
  * 알려주는 버전이 어긋날 수 없다.
  *
- * 그 파일을 못 읽으면 **GitHub 릴리스 API로 떨어진다.** 사이트가 잠깐 죽었다고
- * 업데이트를 못 알리는 것보다, 사실(릴리스)을 직접 읽는 쪽이 낫다.
+ * 그 파일을 못 읽어도, **읽히지만 뒤처져 있어도** GitHub 릴리스 API로 떨어진다.
+ * 0.6.3 이 그래서 아무에게도 뜨지 않았다 — 릴리스는 나갔는데 사이트 갱신을 잊었고,
+ * 읽히는 `0.6.2` 를 최종 답으로 삼은 코드가 GitHub 을 아예 보지 않았다. 사이트를
+ * 잊는 것은 사람의 실수이고, 그 실수로 업데이트가 조용히 멈추는 것보다
+ * 사실(릴리스)을 한 번 더 확인하는 쪽이 낫다.
+ *
+ * 대가는 둘이다. 최신일 때는 두 곳을 다 보므로 앱을 켤 때 요청이 하나 늘고,
+ * 사이트를 잊은 동안에는 앱이 카드보다 새 버전을 안내한다. 다만 그때 받는 링크는
+ * GitHub 자산이라 사용자는 제대로 된 설치 파일을 받는다.
  *
  * 확인은 앱을 켤 때 한 번만 한다. 실패하면 조용히 넘어간다 — 오프라인인 사람에게
  * 경고를 띄울 이유가 없다.
@@ -106,8 +113,8 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     try {
       const info = parse(await getJson(url));
       if (info && isNewer(info.version, currentVersion)) return info;
-      // A readable source that reports no newer version is an answer, not a failure.
-      if (info) return null;
+      // 읽혔다는 것만으로 끝내지 않는다 — 뒤처진 사이트가 GitHub 을 가리면
+      // 업데이트가 조용히 멈춘다. 그것이 0.6.3 에서 일어난 일이다.
     } catch {
       // Try the next source; being offline is not an error worth surfacing.
     }
