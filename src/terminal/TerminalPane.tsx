@@ -3,7 +3,7 @@ import type { SessionKind } from "../types";
 import ContextMenu from "../chrome/ContextMenu";
 import { useWorkspace } from "../store/workspace";
 import { listenForPathDrop } from "../sidebar/dnd";
-import { copyText, pasteInto, selectionOf } from "./clipboard";
+import { copyEverything, copyText, pasteInto, selectionOf } from "./clipboard";
 import { dropTextFor } from "./dropText";
 import { createSession, killSession, writeSession } from "./ipc";
 import {
@@ -12,6 +12,8 @@ import {
   disposeEntry,
   getEntry,
   isMeasurable,
+  noteInput,
+  resetInputModes,
   syncSize,
   writeOutput,
 } from "./termRegistry";
@@ -77,6 +79,8 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
     // stays silent until the terminal answers, and that answer comes through
     // onData like any keystroke.
     const onData = entry.term.onData((data) => {
+      // Before the write, so a report is on record by the time its echo arrives.
+      noteInput(entry, data);
       void writeSession(paneId, data);
     });
     const onBinary = entry.term.onBinary((data) => {
@@ -213,11 +217,17 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
             ...(menu.selection
               ? [{ label: "복사", onSelect: () => void copyText(menu.selection) }]
               : []),
+            // The one copy that needs no selection first, which is what a pane
+            // full of something worth reporting usually is.
+            { label: "모두 복사", onSelect: () => void copyEverything(paneId) },
             { label: "붙여넣기", onSelect: () => void pasteInto(paneId) },
             { label: "모두 선택", onSelect: () => getEntry(paneId)?.term.selectAll() },
             // Scrollback only: the shell keeps its prompt and whatever is typed
             // on it, which `cls` would not.
             { label: "화면 지우기", onSelect: () => getEntry(paneId)?.term.clear() },
+            // For the pane a CLI left reporting mouse moves at a shell that only
+            // echoes them; see `writeOutput`. cmd.exe has no `reset` of its own.
+            { label: "입력 모드 초기화", onSelect: () => resetInputModes(paneId) },
           ]}
         />
       )}
