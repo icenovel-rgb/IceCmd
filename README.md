@@ -84,6 +84,7 @@ python scripts/archive-to-mybox.py             # 최신 릴리스. 특정 판이
 
 ```
 https://github.com/icenovel-rgb/IceCmd/releases/latest/download/IceCmd-Setup-x64.exe
+https://github.com/icenovel-rgb/IceCmd/releases/latest/download/IceCmd-universal.dmg
 ```
 
 ### 창을 보지 않고 검증하기
@@ -110,8 +111,20 @@ VITE_ICECMD_HARNESS=1 npm run tauri dev
 
 **레이아웃 검사는 화면 내용이 아니라 셸 프로세스를 본다.** ConPTY는 리사이즈마다 화면을
 재도색하고 그 과정에서 한 줄쯤 잃기도 해서, 글자가 사라진 게 재시작 탓인지 재도색 탓인지
-구분되지 않는다. 그래서 셸에 `set ICEVAR=<토큰>`을 심어두고 나중에 `echo %ICEVAR%`로 되묻는다 —
-같은 프로세스만 답할 수 있다.
+구분되지 않는다. 그래서 셸에 토큰을 심어두고 나중에 되묻는다 — 같은 프로세스만 답할 수 있다.
+윈도우는 `set ICEVAR=<토큰>` · `echo %ICEVAR%`, 맥은 `ICEVAR=<토큰>` · `echo $ICEVAR` 로
+갈린다(`setVar`·`useVar`). `where` 도 맥에서는 `command -v` 다.
+
+**검사에 쓰는 두 폴더는 실제로 있어야 한다.** 하네스가 거기에 프로젝트를 등록하고 셸을 띄우기
+때문이다. 기계마다 다르므로 환경변수로 갈아끼운다 — 두 번째 것은 **공백이 든 경로**여야
+따옴표 검사가 뜻을 가진다.
+
+```bash
+VITE_ICECMD_HARNESS=1 \
+VITE_ICECMD_PATH_PLAIN="$HOME/dev/IceCmd" \
+VITE_ICECMD_PATH_SPACES="$HOME/dev/Ice Cmd Test" \
+npm run tauri dev
+```
 
 ## 조작
 

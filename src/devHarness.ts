@@ -8,7 +8,11 @@
  * Layout checks assert on the *shell process*, not on screen contents: ConPTY
  * repaints its whole screen on resize and that repaint is not perfectly faithful,
  * so a missing line proves nothing. A shell variable, on the other hand, exists
- * only as long as that same cmd.exe does.
+ * only as long as that same shell process does.
+ *
+ * 셸에 거는 말은 OS 마다 다르다 — 변수 문법(`setVar`·`useVar`)부터 `where` 와
+ * `command -v` 까지. 검사에 쓰는 두 폴더도 기계마다 다르므로 환경변수로 갈아끼운다
+ * (`VITE_ICECMD_PATH_PLAIN`·`VITE_ICECMD_PATH_SPACES`).
  *
  * The harness removes the projects it creates, leaving persisted state untouched.
  */
@@ -31,17 +35,35 @@ import { getEntry, writeOutput } from "./terminal/termRegistry";
 import { bellIsSeen, clearAttention } from "./terminal/status";
 import { dropTextFor } from "./terminal/dropText";
 import { handleDropPayload, type DroppedPath } from "./sidebar/dnd";
-import { checkForUpdate, currentVersion, isNewer } from "./update";
-import { fileManagerName, isWindows, pathSep } from "./platform";
+import { RELEASES_PAGE, checkForUpdate, currentVersion, isNewer } from "./update";
+import { fileManagerName, isMac, isWindows, pathSep } from "./platform";
 import { shellName } from "./shell";
 
-// 검사에 쓰는 가짜 경로도 그 OS 의 것이어야 한다 — 따옴표 규칙이 경로 모양을 따라간다.
-const PATH_PLAIN = isWindows ? "D:\\dev\\IceCmd" : "/Users/ice/dev/IceCmd";
-const PATH_SPACES = isWindows
-  ? "D:\\Naver MYBOX\\2. Works\\Personal\\IceCmd"
-  : "/Users/ice/Naver MYBOX/2. Works/Personal/IceCmd";
+/*
+ * 검사에 쓰는 두 폴더 — **실제로 있는 폴더여야 한다.** 하네스는 여기에 프로젝트를
+ * 등록하고 셸을 띄우고 파일을 되묻는다. 개발 기계마다 다르므로 환경변수로 갈아끼울
+ * 수 있게 두고(`VITE_ICECMD_PATH_PLAIN`·`VITE_ICECMD_PATH_SPACES`), 값이 없으면
+ * 그 OS 의 기본값을 쓴다. 두 번째 것은 **공백이 든 경로여야** 따옴표 검사가 뜻을
+ * 가진다.
+ */
+const PATH_PLAIN =
+  import.meta.env.VITE_ICECMD_PATH_PLAIN ?? (isWindows ? "D:\\dev\\IceCmd" : "/Users/ice/dev/IceCmd");
+const PATH_SPACES =
+  import.meta.env.VITE_ICECMD_PATH_SPACES ??
+  (isWindows ? "D:\\Naver MYBOX\\2. Works\\Personal\\IceCmd" : "/Users/ice/dev/Ice Cmd Test");
 /** cmd 는 큰따옴표, POSIX 셸은 작은따옴표. */
 const PATH_SPACES_QUOTED = isWindows ? `"${PATH_SPACES}"` : `'${PATH_SPACES}'`;
+
+/*
+ * 하네스가 셸에 거는 말 — cmd 와 POSIX 셸은 변수 문법부터 다르다.
+ *
+ * 이 두 줄이 갈리지 않으면 맥에서는 `set ICEVAR=…` 이 그냥 `set` 의 인자가 되고
+ * `%ICEVAR%` 는 글자 그대로 남는다. 검사는 실패하는데 그 이유가 검사 대상과 아무
+ * 상관이 없어진다 — 이 파일이 거듭 배운 함정이다.
+ */
+const setVar = (name: string, value: string) =>
+  isWindows ? `set ${name}=${value}` : `${name}=${value}`;
+const useVar = (name: string) => (isWindows ? `%${name}%` : `$${name}`);
 
 /** Unique per run so a stale buffer can never make a check pass. */
 const MARK = `ICEMARK${Math.floor(Math.random() * 1e9).toString(36)}`;
@@ -161,17 +183,18 @@ const dismissMenu = async () => {
 };
 
 /** Stores a value in the shell; only the same process can report it back. */
-const tagShell = (paneId: string) => writeSession(paneId, `set ICEVAR=${MARK}\r`);
+const tagShell = (paneId: string) => writeSession(paneId, `${setVar("ICEVAR", MARK)}\r`);
 
 /**
  * Asks the shell to echo the stored value behind a fresh token. The token keeps
- * the answer distinguishable from the echoed command line and from earlier runs,
- * and an unset variable echoes literally, which cannot contain the mark.
+ * the answer distinguishable from the echoed command line and from earlier runs.
+ * A variable the process never set answers with something that cannot contain the
+ * mark either way — cmd echoes `%ICEVAR%` literally, a POSIX shell echoes nothing.
  */
 async function shellIsSameProcess(paneId: string): Promise<boolean> {
   probeCounter += 1;
   const token = `IDP${probeCounter}X${Math.floor(Math.random() * 1e6).toString(36)}`;
-  await writeSession(paneId, `echo ${token}=%ICEVAR%\r`);
+  await writeSession(paneId, `echo ${token}=${useVar("ICEVAR")}\r`);
   await sleep(1100);
   return screen(paneId).includes(`${token}=${MARK}`);
 }
@@ -193,24 +216,30 @@ async function shellIsSameProcess(paneId: string): Promise<boolean> {
 async function askShell(paneId: string, command: string): Promise<string> {
   probeCounter += 1;
   const token = `ASK${probeCounter}X${Math.floor(Math.random() * 1e6).toString(36)}`;
-  await writeSession(paneId, `set ICEPROBE=${token}\r`);
+  await writeSession(paneId, `${setVar("ICEPROBE", token)}\r`);
   await sleep(300);
-  await writeSession(paneId, `${command.replace(/TOKEN/g, "%ICEPROBE%")}\r`);
+  await writeSession(paneId, `${command.replace(/TOKEN/g, useVar("ICEPROBE"))}\r`);
   await sleep(1300);
   const answer = new RegExp(`${token}=(\\S*)`).exec(screen(paneId));
   return answer?.[1] ?? "";
 }
 
-const STATE_DIR = "%APPDATA%\\com.icenovel.icecmd";
+/** 앱 설정 폴더 — `app_config_dir()` 가 각 OS 에서 가리키는 바로 그 자리다. */
+const STATE_DIR = isWindows
+  ? "%APPDATA%\\com.icenovel.icecmd"
+  : "$HOME/Library/Application Support/com.icenovel.icecmd";
 
 /**
  * Byte size of a file, or "0" when it does not exist.
  *
- * The space before each `)` keeps the closing paren from being glued onto the
- * value that `echo` prints.
+ * cmd 쪽은 `for %~zA` 말고 크기를 물을 길이 없다. 닫는 괄호 앞의 공백은 그 괄호가
+ * `echo` 가 찍는 값에 붙어 버리는 것을 막는다. 맥은 BSD `stat` 이라 `-f%z` 다
+ * (GNU 의 `-c%s` 가 아니다). 파일이 없으면 둘 다 "0" 으로 답한다.
  */
 const sizeProbe = (name: string) =>
-  `@if exist "${STATE_DIR}\\${name}" (@for %A in ("${STATE_DIR}\\${name}") do @echo TOKEN=%~zA ) else (@echo TOKEN=0 )`;
+  isWindows
+    ? `@if exist "${STATE_DIR}\\${name}" (@for %A in ("${STATE_DIR}\\${name}") do @echo TOKEN=%~zA ) else (@echo TOKEN=0 )`
+    : `echo TOKEN=$(stat -f%z "${STATE_DIR}/${name}" 2>/dev/null || echo 0)`;
 
 /**
  * Two-launch persistence check. `persist1` leaves a split project behind on
@@ -299,13 +328,14 @@ async function runDemo(args: string): Promise<void> {
   const target = panesOf(first)[0];
   useWorkspace.getState().splitPaneWith(target, "col", "shell");
   await sleep(2000);
-  await writeSession(target, "dir /b\r");
+  await writeSession(target, isWindows ? "dir /b\r" : "ls\r");
   await sleep(600);
   await reportChrome();
 
   // Feed the BEL to xterm's parser directly. Sending it as PTY *input* does not
-  // work: cmd's line editor swallows control bytes, so nothing reaches the output
-  // stream. Writing it to the terminal is the same path a CLI's bell takes.
+  // work: a shell's line editor swallows control bytes (cmd and zsh both), so
+  // nothing reaches the output stream. Writing it to the terminal is the same
+  // path a CLI's bell takes.
   if (args.includes("bell") && second) {
     const other = panesOf(second)[0];
     if (other) {
@@ -391,9 +421,19 @@ export async function runHarness(mode = "1"): Promise<void> {
   // take seconds when one of those entries is a network drive. So the screen is
   // polled for the answer instead of read after a fixed pause: a fixed pause
   // failed this check on 2026-09-03 while the same `claude` resolved fine by hand.
-  await writeSession(paneSpaces, "where claude\r");
-  await writeSession(paneSpaces, "where codex\r");
-  const resolves = (name: string) => new RegExp(`${name}\\.(cmd|exe)`, "i").test(screen(paneSpaces));
+  // 맥에는 `where` 가 없다 — `command -v` 가 그 자리다.
+  const askWhere = (name: string) => (isWindows ? `where ${name}\r` : `command -v ${name}\r`);
+  await writeSession(paneSpaces, askWhere("claude"));
+  await writeSession(paneSpaces, askWhere("codex"));
+  /*
+   * 답의 모양도 다르다. cmd 는 `claude.cmd`·`claude.exe` 를, POSIX 셸은 경로
+   * 한 줄(`/opt/homebrew/bin/claude`)을 찍는다. 되울린 명령줄에는 `/` 가 붙은
+   * 이름이 없으므로, 슬래시를 요구하는 것만으로 질문과 답이 갈린다.
+   */
+  const resolves = (name: string) =>
+    (isWindows ? new RegExp(`${name}\\.(cmd|exe)`, "i") : new RegExp(`/${name}(\\s|$)`, "m")).test(
+      screen(paneSpaces),
+    );
   for (let i = 0; i < 80 && !(resolves("claude") && resolves("codex")); i += 1) await sleep(100);
   check("claude resolves on PATH", resolves("claude"));
   check("codex resolves on PATH", resolves("codex"));
@@ -849,7 +889,18 @@ export async function runHarness(mode = "1"): Promise<void> {
       offered?.version === expected,
       `offered=${offered?.version ?? "none"} expected=${expected}`,
     );
-    check("installer link points at an .exe", Boolean(offered?.downloadUrl.endsWith(".exe")));
+    /*
+     * 그 OS 의 설치 파일이어야 한다 — 맥에서 `.exe` 를 권하면 안내가 없느니만 못하다.
+     * 아직 그 자산이 릴리스에 없으면 `update.ts` 가 릴리스 페이지로 떨어뜨리므로,
+     * 그것도 옳은 답으로 센다(맥 dmg 가 처음 나가기 전까지가 그 상태다).
+     */
+    const installerSuffix = isMac ? ".dmg" : ".exe";
+    const link = offered?.downloadUrl ?? "";
+    check(
+      `installer link points at ${installerSuffix === ".dmg" ? "a .dmg" : "an .exe"}`,
+      link.endsWith(installerSuffix) || link === RELEASES_PAGE,
+      link,
+    );
     // The banner renders after its own start delay; give it room before looking.
     await sleep(4500);
     const banner = document.querySelector(".update-banner");
@@ -1485,7 +1536,11 @@ export async function runHarness(mode = "1"): Promise<void> {
    * `forceColor` proves nothing about what the process got.
    */
   const colourEnvOf = async (paneId: string) => {
-    await writeSession(paneId, `echo ${MARK}-col[%TERM%][%COLORTERM%][%FORCE_COLOR%]\r`);
+    const probe = `${MARK}-col[${useVar("TERM")}][${useVar("COLORTERM")}][${useVar("FORCE_COLOR")}]`;
+    // **zsh 는 따옴표 없는 `[...]` 를 글롭으로 읽는다** — 맞는 파일이 없으면 명령이
+    // 아예 실행되지 않고 "no matches found" 로 끝난다. 큰따옴표 안에서도 변수는
+    // 그대로 펴지므로 답의 모양은 두 OS 가 같다.
+    await writeSession(paneId, isWindows ? `echo ${probe}\r` : `echo "${probe}"\r`);
     await sleep(700);
     return screen(paneId);
   };
@@ -1679,11 +1734,13 @@ export async function runHarness(mode = "1"): Promise<void> {
      * --- a CLI that left the pane reporting mouse moves ---
      *
      * claude and codex both ask for mouse and focus reporting, and a CLI pane
-     * deliberately keeps a shell alive after its CLI exits (see `spawn.rs`). A
-     * CLI killed before it could switch that reporting off therefore hands a
-     * live cmd.exe a terminal that narrates every mouse move at it — and cmd,
-     * which has no `reset` of its own, types those escape codes onto its command
-     * line. Both cures are checked here through real mouse events: xterm.js is
+     * deliberately keeps a shell alive after its CLI exits on either OS (see
+     * `spawn.rs`: `cmd /K … claude` on Windows, `claude; exec "$SHELL"` on the
+     * rest). A CLI killed before it could switch that reporting off therefore
+     * hands a live shell a terminal that narrates every mouse move at it, and
+     * the shell types those escape codes onto its command line — cmd has no
+     * `reset` to undo it with, and on a mac the user would have to know to run
+     * one. Both cures are checked here through real mouse events: xterm.js is
      * what decides whether to report, so only an event can prove it stopped.
      */
     const screenEl = host.querySelector<HTMLElement>(".xterm-screen");
