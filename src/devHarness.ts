@@ -32,9 +32,16 @@ import { bellIsSeen, clearAttention } from "./terminal/status";
 import { dropTextFor } from "./terminal/dropText";
 import { handleDropPayload, type DroppedPath } from "./sidebar/dnd";
 import { checkForUpdate, currentVersion, isNewer } from "./update";
+import { fileManagerName, isWindows, pathSep } from "./platform";
+import { shellName } from "./shell";
 
-const PATH_PLAIN = "D:\\dev\\IceCmd";
-const PATH_SPACES = "D:\\Naver MYBOX\\2. Works\\Personal\\IceCmd";
+// 검사에 쓰는 가짜 경로도 그 OS 의 것이어야 한다 — 따옴표 규칙이 경로 모양을 따라간다.
+const PATH_PLAIN = isWindows ? "D:\\dev\\IceCmd" : "/Users/ice/dev/IceCmd";
+const PATH_SPACES = isWindows
+  ? "D:\\Naver MYBOX\\2. Works\\Personal\\IceCmd"
+  : "/Users/ice/Naver MYBOX/2. Works/Personal/IceCmd";
+/** cmd 는 큰따옴표, POSIX 셸은 작은따옴표. */
+const PATH_SPACES_QUOTED = isWindows ? `"${PATH_SPACES}"` : `'${PATH_SPACES}'`;
 
 /** Unique per run so a stale buffer can never make a check pass. */
 const MARK = `ICEMARK${Math.floor(Math.random() * 1e9).toString(36)}`;
@@ -594,13 +601,17 @@ export async function runHarness(mode = "1"): Promise<void> {
   await sleep(500);
   check(
     "folder header offers open-in-Explorer",
-    Boolean(document.querySelector('.tree-header-actions button[title="탐색기에서 열기"]')),
+    Boolean(
+      document.querySelector(
+        `.tree-header-actions button[title="${fileManagerName}에서 열기"]`,
+      ),
+    ),
   );
-  const fileRejected = await openInFileManager(`${PATH_PLAIN}\\package.json`)
+  const fileRejected = await openInFileManager(`${PATH_PLAIN}${pathSep}package.json`)
     .then(() => false)
     .catch(() => true);
   check("open_in_file_manager refuses a file", fileRejected);
-  const missingRejected = await openInFileManager(`${PATH_PLAIN}\\__no_such_dir__`)
+  const missingRejected = await openInFileManager(`${PATH_PLAIN}${pathSep}__no_such_dir__`)
     .then(() => false)
     .catch(() => true);
   check("open_in_file_manager refuses a missing path", missingRejected);
@@ -986,7 +997,10 @@ export async function runHarness(mode = "1"): Promise<void> {
     check("right-click opens the project menu", Boolean(document.querySelector(".context-menu")));
     // Not pressed: it would throw an Explorer window over the app mid-run. The
     // press path it shares with the item below is what was broken.
-    check("the menu offers open-in-Explorer", Boolean(menuItem("탐색기에서 열기")));
+    check(
+      "the menu offers open-in-Explorer",
+      Boolean(menuItem(`${fileManagerName}에서 열기`)),
+    );
 
     const remove = menuItem("제거");
     check("the menu offers remove", Boolean(remove));
@@ -1037,7 +1051,11 @@ export async function runHarness(mode = "1"): Promise<void> {
 
   check(
     "the folder header icon is drawn, not a glyph",
-    Boolean(document.querySelector('.tree-header-actions button[title="탐색기에서 열기"] svg')),
+    Boolean(
+      document.querySelector(
+        `.tree-header-actions button[title="${fileManagerName}에서 열기"] svg`,
+      ),
+    ),
   );
 
   if (fileRow) {
@@ -1055,11 +1073,11 @@ export async function runHarness(mode = "1"): Promise<void> {
     await sleep(300);
     check(
       "a folder offers Explorer and a shell",
-      menuLabels() === "탐색기에서 열기|여기서 cmd 열기",
+      menuLabels() === `${fileManagerName}에서 열기|여기서 ${shellName()} 열기`,
       menuLabels(),
     );
 
-    const here = menuItem("여기서 cmd 열기");
+    const here = menuItem(`여기서 ${shellName()} 열기`);
     check("the folder menu has the shell item", Boolean(here));
     if (here) {
       const before = panesOf(idPlain);
@@ -1102,12 +1120,12 @@ export async function runHarness(mode = "1"): Promise<void> {
   check("quoting: a plain path is left alone", dropTextFor([PATH_PLAIN]) === PATH_PLAIN);
   check(
     "quoting: a path with spaces is quoted",
-    dropTextFor([PATH_SPACES]) === `"${PATH_SPACES}"`,
+    dropTextFor([PATH_SPACES]) === PATH_SPACES_QUOTED,
     dropTextFor([PATH_SPACES]),
   );
   check(
     "quoting: several paths are separated",
-    dropTextFor([PATH_PLAIN, PATH_SPACES]) === `${PATH_PLAIN} "${PATH_SPACES}"`,
+    dropTextFor([PATH_PLAIN, PATH_SPACES]) === `${PATH_PLAIN} ${PATH_SPACES_QUOTED}`,
   );
 
   const host = document.querySelector<HTMLElement>(`[data-pane="${panePlain}"] .terminal-host`);
@@ -1117,7 +1135,7 @@ export async function runHarness(mode = "1"): Promise<void> {
     const scale = window.devicePixelRatio || 1;
     const inside = { x: (box.left + box.width / 2) * scale, y: (box.top + box.height / 2) * scale };
     const outside = { x: -50, y: -50 };
-    const dropped = `${PATH_SPACES}\\README.md`;
+    const dropped = `${PATH_SPACES}${pathSep}README.md`;
 
     let hovered: boolean | null = null;
     const target = {
@@ -1164,7 +1182,7 @@ export async function runHarness(mode = "1"): Promise<void> {
    * dispatched end to end, which is what happens below.
    */
   const dragRow =
-    treeRows().find((row) => (row.dataset.path ?? "").endsWith("\\package.json")) ?? null;
+    treeRows().find((row) => (row.dataset.path ?? "").endsWith(`${pathSep}package.json`)) ?? null;
   check("the folder tree has a row to drag", Boolean(dragRow));
   if (dragRow && host) {
     const draggedPath = dragRow.dataset.path ?? "";
@@ -1563,7 +1581,7 @@ export async function runHarness(mode = "1"): Promise<void> {
     .then(() => false)
     .catch(() => true);
   check("open_path refuses a folder", openFolderRejected);
-  const revealMissingRejected = await revealPath(`${PATH_PLAIN}\\__no_such_file__`)
+  const revealMissingRejected = await revealPath(`${PATH_PLAIN}${pathSep}__no_such_file__`)
     .then(() => false)
     .catch(() => true);
   check("reveal_path refuses a missing path", revealMissingRejected);
@@ -1587,7 +1605,7 @@ export async function runHarness(mode = "1"): Promise<void> {
    * That the window highlights the file is the one thing here a person still has
    * to look at — this can only assert that the command was accepted.
    */
-  const revealedWithSpaces = await revealPath(`${PATH_SPACES}\\README.md`)
+  const revealedWithSpaces = await revealPath(`${PATH_SPACES}${pathSep}README.md`)
     .then(() => true)
     .catch(() => false);
   check("reveal_path accepts a path with spaces", revealedWithSpaces);

@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import type { FsEntry } from "../types";
 import { openInFileManager, openPath, readDir, revealPath, watchDirs } from "../terminal/ipc";
 import { beginPathDrag } from "../terminal/pathDrag";
+import { fileManagerName, pathSep } from "../platform";
+import { shellName } from "../shell";
 import { useWorkspace } from "../store/workspace";
 import ContextMenu from "../chrome/ContextMenu";
 
@@ -20,7 +22,8 @@ interface Menu {
 
 /**
  * Windows compares paths case-insensitively, and the watcher can answer with a
- * different case (or a trailing separator) than the tree asked with.
+ * different case (or a trailing separator) than the tree asked with. macOS is
+ * case-insensitive by default too, and `\\?\` simply never appears there.
  */
 const sameDirKey = (path: string) => path.replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").toLowerCase();
 
@@ -104,11 +107,11 @@ export default function FolderTree({ projectId, rootPath }: Props) {
     target.isDir
       ? [
           {
-            label: "탐색기에서 열기",
+            label: `${fileManagerName}에서 열기`,
             onSelect: () => void openInFileManager(target.path).catch(() => {}),
           },
           {
-            label: "여기서 cmd 열기",
+            label: `여기서 ${shellName()} 열기`,
             onSelect: () => openCli(projectId, "shell", target.path),
           },
         ]
@@ -126,7 +129,7 @@ export default function FolderTree({ projectId, rootPath }: Props) {
     if (entries.length === 0) return <p className="tree-note">빈 폴더</p>;
 
     return entries.map((entry) => {
-      const childPath = `${path}\\${entry.name}`;
+      const childPath = `${path}${pathSep}${entry.name}`;
       const isOpen = expanded.has(childPath);
       return (
         <div key={childPath}>
@@ -177,7 +180,7 @@ export default function FolderTree({ projectId, rootPath }: Props) {
             }}
             title={
               entry.isDir
-                ? "클릭: 펼치기 · 우클릭: 탐색기에서 열기 · 끌어서 터미널에 놓으면 경로 입력"
+                ? `클릭: 펼치기 · 우클릭: ${fileManagerName}에서 열기 · 끌어서 터미널에 놓으면 경로 입력`
                 : `${entry.name} · 더블클릭: 열기 · 끌어서 터미널에 놓으면 경로 입력`
             }
           >
@@ -197,7 +200,7 @@ export default function FolderTree({ projectId, rootPath }: Props) {
         <span className="tree-header-actions">
           <button
             type="button"
-            title="탐색기에서 열기"
+            title={`${fileManagerName}에서 열기`}
             onClick={() => void openInFileManager(rootPath).catch(() => {})}
           >
             {/* An open folder, not the grid glyph that used to sit here and read

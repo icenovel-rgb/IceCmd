@@ -2,12 +2,15 @@ import { useEffect } from "react";
 import TerminalPane from "../terminal/TerminalPane";
 import { getEntry } from "../terminal/termRegistry";
 import { useWorkspace, type PaneMeta } from "../store/workspace";
+import { modLabel } from "../platform";
+import { shellName } from "../shell";
 
-const KIND_LABEL: Record<PaneMeta["kind"], string> = {
-  shell: "cmd",
-  claude: "claude",
-  codex: "codex",
-};
+/**
+ * 이름표는 그 페인이 실제로 띄운 프로그램의 이름이다. 셸만 기계마다 다르다 —
+ * 윈도우는 cmd, 맥은 로그인 셸(zsh·bash).
+ */
+const kindLabel = (kind: PaneMeta["kind"]): string =>
+  kind === "shell" ? shellName() : kind;
 
 interface Props {
   meta: PaneMeta;
@@ -58,18 +61,18 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
         >
           ⠿
         </button>
-        <span className="pane-kind">{KIND_LABEL[meta.kind]}</span>
+        <span className="pane-kind">{kindLabel(meta.kind)}</span>
         {/* The glyph shows which way the new divider will run. */}
         <button
           type="button"
-          title="좌우로 분할 (Ctrl+Shift+D)"
+          title={`좌우로 분할 (${modLabel}+Shift+D)`}
           onClick={() => splitPaneWith(meta.paneId, "row", "shell")}
         >
           │
         </button>
         <button
           type="button"
-          title="위아래로 분할 (Ctrl+Shift+E)"
+          title={`위아래로 분할 (${modLabel}+Shift+E)`}
           onClick={() => splitPaneWith(meta.paneId, "col", "shell")}
         >
           ─
@@ -77,7 +80,7 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
         <button
           type="button"
           className="pane-close"
-          title="페인 닫기 (Ctrl+Shift+W)"
+          title={`페인 닫기 (${modLabel}+Shift+W)`}
           onClick={() => closePane(meta.paneId)}
         >
           ✕

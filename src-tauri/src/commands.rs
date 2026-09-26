@@ -92,6 +92,29 @@ pub fn log_line(message: String) {
     eprintln!("[fe] {message}");
 }
 
+/// 페인이 띄우는 셸의 이름 — 이름표와 메뉴가 이 이름을 그대로 적는다.
+///
+/// 윈도우는 언제나 `cmd` 지만 유닉스에서는 로그인 셸이므로 zsh 일 수도 bash 일
+/// 수도 있다. 화면에 "cmd" 라고 박아 두면 맥에서는 그냥 거짓말이 되므로 물어본다.
+/// **`pty::spawn` 이 실제로 띄우는 것과 같은 규칙이어야 한다** — 규칙이 갈리면
+/// 이름표가 다른 프로그램의 이름을 적게 된다.
+#[tauri::command]
+pub fn shell_name() -> String {
+    #[cfg(windows)]
+    {
+        "cmd".to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        // 빌린 것을 먼저 끝낸 뒤에야 shell 을 넘겨줄 수 있다.
+        let name = std::path::Path::new(&shell)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned());
+        name.unwrap_or(shell)
+    }
+}
+
 /// Opens a folder in the OS file manager.
 #[tauri::command]
 pub fn open_in_file_manager(path: String) -> Result<(), String> {

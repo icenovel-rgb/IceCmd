@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { fileManagerName, isMac, modLabel } from "../platform";
 import { useWorkspace } from "../store/workspace";
 import { paneIds } from "../layout/tree";
 import { clearAttention } from "../terminal/status";
@@ -142,8 +143,11 @@ export default function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-title">
         <span>프로젝트</span>
-        {/* Ctrl +/- has no other visible feedback. */}
-        <span className="zoom-readout" title="Ctrl + / − / 0 · Ctrl+휠">
+        {/* 그 단축키에는 이것 말고 눈에 보이는 반응이 없다. */}
+        <span
+          className="zoom-readout"
+          title={`${modLabel} + / − / 0 · ${isMac ? "트랙패드 핀치" : "Ctrl+휠"}`}
+        >
           {fontSize}px
         </span>
       </div>
@@ -169,7 +173,7 @@ export default function Sidebar() {
         ))}
         {projects.length === 0 && (
           <p className="sidebar-empty">
-            탐색기에서 폴더를
+            {fileManagerName}에서 폴더를
             <br />
             여기로 끌어다 놓으세요
           </p>
@@ -185,7 +189,7 @@ export default function Sidebar() {
           onClose={closeMenu}
           entries={[
             {
-              label: "탐색기에서 열기",
+              label: `${fileManagerName}에서 열기`,
               onSelect: () => {
                 const target = projects.find((p) => p.id === menu.projectId);
                 if (target) void openInFileManager(target.path).catch(() => {});

@@ -14,3 +14,32 @@ const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
 
 export const isMac = /Mac(intosh| OS X)/i.test(ua);
 export const isWindows = /Windows/i.test(ua);
+
+/**
+ * 경로 구분자. 폴더 트리는 부모 경로에 이름을 이어 붙여 자식 경로를 만드는데,
+ * 여기에 `\` 를 박아 두면 맥에서는 있지도 않은 경로가 되어 **트리가 한 칸도
+ * 펼쳐지지 않는다.** 백엔드는 이름만 돌려주므로 잇는 일은 이쪽 몫이다.
+ */
+export const pathSep = isWindows ? "\\" : "/";
+
+/**
+ * 앱 단축키의 수정자.
+ *
+ * 맥에서 Ctrl 은 **셸의 것이다** — Ctrl+C 는 인터럽트고, Ctrl+A·Ctrl+E 는 줄 편집이다.
+ * 그래서 앱이 가로채는 것은 ⌘ 이고, 윈도우에서는 그대로 Ctrl 이다.
+ */
+export const hasMod = (event: KeyboardEvent): boolean =>
+  isMac ? event.metaKey : event.ctrlKey;
+
+/** 반대쪽 수정자. 눌려 있으면 우리 단축키가 아니다(⌘+Ctrl+C 같은 조합). */
+export const hasOtherMod = (event: KeyboardEvent): boolean =>
+  isMac ? event.ctrlKey : event.metaKey;
+
+/** 화면에 적는 그 수정자의 이름. */
+export const modLabel = isMac ? "⌘" : "Ctrl";
+
+/** 복사·붙여넣기만 규칙이 다르다: 맥은 ⌘C/⌘V, 윈도우는 Ctrl+C 가 셸의 것이라 Shift 를 낀다. */
+export const copyPasteLabel = isMac ? "⌘C / ⌘V" : "Ctrl+Shift+C / V";
+
+/** OS 가 폴더를 보여주는 프로그램의 이름 — 메뉴에 그대로 적힌다. */
+export const fileManagerName = isMac ? "Finder" : "탐색기";

@@ -53,6 +53,9 @@ export const killSession = (sessionId: string) =>
 export const sessionAlive = (sessionId: string) =>
   invoke<boolean>("session_alive", { sessionId });
 
+/** 이 기계의 셸 이름("cmd"·"zsh"·"bash"). 이름표가 이것을 적는다. */
+export const shellNameOf = () => invoke<string>("shell_name");
+
 export const readDir = (path: string) => invoke<FsEntry[]>("read_dir", { path });
 
 export const pathInfo = (path: string) => invoke<PathInfo>("path_info", { path });

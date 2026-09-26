@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useWorkspace, type RightClickAction } from "../store/workspace";
 import ScaleControl from "./ScaleControl";
+import { copyPasteLabel } from "../platform";
 
 interface Props {
   onClose: () => void;
@@ -17,7 +18,7 @@ const RIGHT_CLICK_CHOICES: { value: RightClickAction; label: string; note: strin
  *
  * The two size sliders live here too: they are adjusted once and then left
  * alone, and having them in the panel footer pushed the folder tree into a
- * strip. Ctrl +/− still changes the terminal size without opening anything.
+ * strip. 확대·축소 단축키는 이것을 열지 않고도 그대로 터미널 크기를 바꾼다.
  */
 export default function SettingsModal({ onClose }: Props) {
   const prefs = useWorkspace((s) => s.prefs);
@@ -62,7 +63,7 @@ export default function SettingsModal({ onClose }: Props) {
           <p className="pref-note">
             {RIGHT_CLICK_CHOICES.find((choice) => choice.value === prefs.rightClick)?.note}
             {" · "}
-            Ctrl+Shift+C / V는 어느 쪽이든 그대로입니다.
+            {copyPasteLabel}는 어느 쪽이든 그대로입니다.
           </p>
         </section>
 

@@ -22,6 +22,7 @@ pub fn run() {
             commands::kill_session,
             commands::session_alive,
             commands::log_line,
+            commands::shell_name,
             commands::open_external,
             commands::open_in_file_manager,
             commands::open_path,

@@ -1,8 +1,9 @@
 /**
  * Copy and paste for a terminal pane.
  *
- * Kept in one place because two callers need it — Ctrl+Shift+C/V and the pane's
- * own context menu — and a second copy would drift from this one.
+ * Kept in one place because two callers need it — the copy/paste shortcut
+ * (Ctrl+Shift+C/V on Windows, ⌘C/⌘V on macOS) and the pane's own context menu —
+ * and a second copy would drift from this one.
  */
 import { writeSession } from "./ipc";
 import { getEntry } from "./termRegistry";

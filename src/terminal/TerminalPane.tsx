@@ -171,7 +171,7 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
         /*
          * Blocking the WebView2 menu took Edge's copy/paste with it, so the pane
          * offers its own — or pastes outright, if that is what the user set in
-         * 설정. Ctrl+Shift+C/V do the same two things either way.
+         * 설정. 복사·붙여넣기 단축키는 어느 쪽이든 같은 두 가지를 한다.
          */
         onContextMenu={(event) => {
           event.preventDefault();

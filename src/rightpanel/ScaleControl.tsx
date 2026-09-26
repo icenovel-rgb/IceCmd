@@ -4,6 +4,7 @@ import {
   UI_SCALE_STEP,
   useWorkspace,
 } from "../store/workspace";
+import { modLabel } from "../platform";
 
 interface RowProps {
   label: string;
@@ -94,8 +95,8 @@ export default function ScaleControl() {
       <ScaleRow
         label="터미널 글자"
         readout={`${fontSize}px`}
-        minusTitle="작게 (Ctrl−)"
-        plusTitle="크게 (Ctrl+)"
+        minusTitle={`작게 (${modLabel}−)`}
+        plusTitle={`크게 (${modLabel}+)`}
         onMinus={() => nudgeFontSize(-1)}
         onPlus={() => nudgeFontSize(1)}
         onReset={() => setFontSize(DEFAULT_UI.fontSize)}

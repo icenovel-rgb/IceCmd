@@ -61,8 +61,14 @@ const entries = new Map<string, TermEntry>();
  * what xterm.js assumes. Mixing a Latin font with a fallback Hangul font makes
  * columns drift. Falls back to the stack the other ICE apps use.
  * Keep in sync with `--font-mono` in styles.css.
+ *
+ * 맥에는 Consolas·Malgun Gothic 이 없다. D2Coding 을 깔지 않은 맥에서는
+ * ui-monospace(SF Mono) → Menlo 가 잡히고 한글은 Apple SD Gothic Neo 로 떨어지는데,
+ * 그 조합은 한글 폭이 라틴의 정확히 2배가 아니다 — **맥에서 표가 어긋나 보이면
+ * D2Coding 을 설치하는 것이 답이다.**
  */
-const FONT_STACK = '"D2Coding", ui-monospace, Consolas, "Malgun Gothic", monospace';
+const FONT_STACK =
+  '"D2Coding", ui-monospace, Consolas, Menlo, "Malgun Gothic", "Apple SD Gothic Neo", monospace';
 
 export function createEntry(paneId: string, fontSize: number): TermEntry {
   const existing = entries.get(paneId);
