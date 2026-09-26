@@ -32,7 +32,9 @@ import sys
 import urllib.request
 
 REPO = "icenovel-rgb/IceCmd"
-MYBOX = r"D:\Naver MYBOX\2. Works\Personal\IceCmd"
+# 백업 엔진이 보는 자리. 맥에서 릴리스를 낼 때는 그 기계의 MYBOX 경로를
+# `ICECMD_MYBOX` 로 넘긴다 — 없는 드라이브 문자로 죽는 것보다 낫다.
+MYBOX = os.environ.get("ICECMD_MYBOX") or r"D:\Naver MYBOX\2. Works\Personal\IceCmd"
 
 # 소스 사본에서 뺄 것. 빌드 산출물·의존성은 백업할 이유가 없고, 넣으면 동기화가 수만 개를 끈다.
 SKIP_DIRS = {"node_modules", "target", "dist", "dist-ssr", ".git", "__pycache__", ".venv"}
@@ -106,7 +108,10 @@ def main() -> int:
 
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if not os.path.isdir(MYBOX):
-        sys.exit(f"MYBOX 폴더가 없습니다: {MYBOX} — 드라이브가 연결돼 있습니까?")
+        sys.exit(
+            f"MYBOX 폴더가 없습니다: {MYBOX}\n"
+            "드라이브가 연결돼 있는지 보고, 다른 기계라면 ICECMD_MYBOX 로 그 경로를 넘기세요."
+        )
 
     rel = fetch_release(a.tag)
     tag = rel.get("tag_name") or "?"
