@@ -27,7 +27,7 @@ import {
   sessionAlive,
   writeSession,
 } from "./terminal/ipc";
-import { getEntry } from "./terminal/termRegistry";
+import { getEntry, writeOutput } from "./terminal/termRegistry";
 import { bellIsSeen, clearAttention } from "./terminal/status";
 import { dropTextFor } from "./terminal/dropText";
 import { handleDropPayload, type DroppedPath } from "./sidebar/dnd";
@@ -353,6 +353,14 @@ export async function runHarness(mode = "1"): Promise<void> {
     await sleep(1000);
   }
   check("the run starts with an empty workspace", useWorkspace.getState().projects.length === 0);
+  // An interrupted run can also leave the colour switch on: it is flipped for one
+  // check and put back at the end, and a run that is killed has no end. Left on,
+  // it fails "a plain shell is not forced by default" for a reason that has
+  // nothing to do with the app (2026-09-03).
+  if (useWorkspace.getState().prefs.forceColor) {
+    await logLine("harness clearing the colour switch left on by an earlier run");
+    useWorkspace.getState().setPrefs({ forceColor: false });
+  }
 
   // --- projects and their automatic terminal (R2, R3) ---
   const idPlain = useWorkspace.getState().addProject(PATH_PLAIN, "IceCmd");
@@ -379,13 +387,16 @@ export async function runHarness(mode = "1"): Promise<void> {
   const installedStateBefore = await askShell(panePlain, sizeProbe("state.json"));
 
   // --- CLI availability, without actually starting the CLIs ---
+  // `where` walks every PATH entry, and the first walk after a cold start can
+  // take seconds when one of those entries is a network drive. So the screen is
+  // polled for the answer instead of read after a fixed pause: a fixed pause
+  // failed this check on 2026-09-03 while the same `claude` resolved fine by hand.
   await writeSession(paneSpaces, "where claude\r");
-  await sleep(900);
   await writeSession(paneSpaces, "where codex\r");
-  await sleep(1200);
-  const whereOut = screen(paneSpaces);
-  check("claude resolves on PATH", /claude\.cmd|claude\.exe/i.test(whereOut));
-  check("codex resolves on PATH", /codex\.cmd|codex\.exe/i.test(whereOut));
+  const resolves = (name: string) => new RegExp(`${name}\\.(cmd|exe)`, "i").test(screen(paneSpaces));
+  for (let i = 0; i < 80 && !(resolves("claude") && resolves("codex")); i += 1) await sleep(100);
+  check("claude resolves on PATH", resolves("claude"));
+  check("codex resolves on PATH", resolves("codex"));
 
   // --- the shell must survive layout changes (regression: remount killed it) ---
   useWorkspace.getState().setActiveProject(idPlain);
@@ -822,14 +833,21 @@ export async function runHarness(mode = "1"): Promise<void> {
    * than a hard-coded expectation. Run with ICECMD_FAKE_VERSION=0.1.0 to take the
    * "a newer version exists" branch — the banner path is otherwise only reachable
    * in the window between a release and installing it.
+   *
+   * The offer is the FIRST source that reports something newer, in source order.
+   * Expecting `siteVersion` alone called 0.6.3 correct: the site sat at 0.6.2 because
+   * the release step was forgotten, GitHub knew better, and the app offered nothing.
    */
+  const ghVersion = (gh as { tag_name?: string } | null)?.tag_name?.replace(/^v/, "");
+  const expected = [siteVersion, ghVersion].find(
+    (candidate) => typeof candidate === "string" && isNewer(candidate, currentVersion),
+  );
   const offered = await checkForUpdate();
-  const behind = typeof siteVersion === "string" && isNewer(siteVersion, currentVersion);
-  if (behind) {
+  if (expected) {
     check(
       "newer version is offered when behind",
-      offered?.version === siteVersion,
-      `offered=${offered?.version ?? "none"} site=${siteVersion}`,
+      offered?.version === expected,
+      `offered=${offered?.version ?? "none"} expected=${expected}`,
     );
     check("installer link points at an .exe", Boolean(offered?.downloadUrl.endsWith(".exe")));
     // The banner renders after its own start delay; give it room before looking.
@@ -844,6 +862,15 @@ export async function runHarness(mode = "1"): Promise<void> {
     );
     check("no banner when up to date", !document.querySelector(".update-banner"));
   }
+  /*
+   * The regression itself, stated so it fails rather than goes quiet: whatever the
+   * site says, a newer GitHub release must reach the user.
+   */
+  check(
+    "a stale site does not hide a newer github release",
+    !(typeof ghVersion === "string" && isNewer(ghVersion, currentVersion)) || offered !== null,
+    `gh=${ghVersion ?? "?"} site=${siteVersion ?? "?"} offered=${offered?.version ?? "none"}`,
+  );
   check(
     "footer shows either a version line or an update banner",
     Boolean(document.querySelector(".version-line, .update-banner")),
@@ -978,6 +1005,115 @@ export async function runHarness(mode = "1"): Promise<void> {
     );
 
     paintTerm.refresh = realRefresh;
+  }
+
+  /*
+   * --- leaving a project must not resize the shells it leaves behind ---
+   *
+   * A stage that is not the active one is `display: none`, and a computed style
+   * inside one hands back `.terminal-host`'s `100%` verbatim instead of a resolved
+   * length. FitAddon reads that as 100 *pixels* and proposes roughly ten columns.
+   * That number used to reach the PTY the instant the pane's ResizeObserver fired
+   * on the way out, so claude and codex redrew their whole interface about four
+   * characters wide — and they do it with real newlines and box characters, which
+   * is why coming back could never unwrap it. The narrow banner stayed in the
+   * scrollback for the rest of the session.
+   *
+   * Asserted on the entry rather than on screen: `sentCols` is what the child was
+   * actually told, and that is the thing that must not move.
+   */
+  const leftBehind = getEntry(panePlain);
+  check("the pane is reachable for the hidden-resize check", Boolean(leftBehind));
+  if (leftBehind) {
+    const wideCols = leftBehind.term.cols;
+    const wideSent = leftBehind.sentCols;
+    check("the pane on screen has a real grid to begin with", wideCols > 40, `cols=${wideCols}`);
+
+    useWorkspace.getState().setActiveProject(idSpaces);
+    // Well past the 80 ms resize debounce, so a shrink would have landed by now.
+    await sleep(600);
+    check(
+      "a hidden pane keeps its grid",
+      leftBehind.term.cols === wideCols,
+      `cols=${leftBehind.term.cols} want=${wideCols}`,
+    );
+    check(
+      "a hidden pane's shell is never told a new size",
+      leftBehind.sentCols === wideSent,
+      `sent=${leftBehind.sentCols} want=${wideSent}`,
+    );
+
+    useWorkspace.getState().setActiveProject(idPlain);
+    await sleep(600);
+    check(
+      "coming back leaves the grid wide",
+      leftBehind.term.cols > 40,
+      `cols=${leftBehind.term.cols}`,
+    );
+  }
+
+  /*
+   * --- the folder tree comes back the way it was left ---
+   *
+   * Which rows are open used to be `useState` inside a component the right panel
+   * remounts on every project change, and the mount effect cleared it as well.
+   * Opening a folder, glancing at another project and coming back therefore always
+   * found the tree collapsed back to its root.
+   */
+  const dirRows = () => Array.from(document.querySelectorAll<HTMLElement>(".tree-row.tree-dir"));
+  const openable = dirRows()[0] ?? null;
+  check("the folder tree offers a folder to open", Boolean(openable));
+  if (openable) {
+    const openedPath = openable.dataset.path ?? "";
+    const spot = openable.getBoundingClientRect();
+    // A press that never moves is a tap, and `beginPathDrag` decides that on release.
+    openable.dispatchEvent(pointerAt("pointerdown", spot.left + 4, spot.top + 4));
+    window.dispatchEvent(pointerAt("pointerup", spot.left + 4, spot.top + 4));
+    await sleep(700);
+
+    const rowIsOpen = () =>
+      dirRows().some(
+        (row) =>
+          row.dataset.path === openedPath &&
+          (row.querySelector(".tree-caret")?.textContent ?? "") === "▾",
+      );
+    check("clicking a folder opens it", rowIsOpen(), `path=${openedPath}`);
+    check(
+      "the store is what remembers it, not the component",
+      (useWorkspace.getState().expandedFolders[idPlain] ?? []).includes(openedPath),
+      `open=${(useWorkspace.getState().expandedFolders[idPlain] ?? []).length}`,
+    );
+    const rowsWhileOpen = document.querySelectorAll(".tree-row").length;
+
+    useWorkspace.getState().setActiveProject(idSpaces);
+    await sleep(500);
+    useWorkspace.getState().setActiveProject(idPlain);
+    await sleep(1000);
+
+    check(
+      "a folder left open is still open after visiting another project",
+      rowIsOpen(),
+      `path=${openedPath}`,
+    );
+    // The remount drops the cached listings on purpose, so the rows of a folder
+    // that is already open have to be fetched again — without that they sit on "…".
+    check(
+      "its children are read again rather than left on a placeholder",
+      document.querySelectorAll(".tree-row").length === rowsWhileOpen,
+      `rows=${document.querySelectorAll(".tree-row").length} want=${rowsWhileOpen}`,
+    );
+
+    const savedState = (await loadState().catch(() => "")) ?? "";
+    check(
+      "the open rows reach the state file",
+      savedState.includes("expandedFolders") &&
+        savedState.includes(JSON.stringify(openedPath).slice(1, -1)),
+      `bytes=${savedState.length}`,
+    );
+
+    // Put it back, so the run leaves the tree as it found it.
+    useWorkspace.getState().toggleFolder(idPlain, openedPath);
+    await sleep(300);
   }
 
   /*
@@ -1443,7 +1579,7 @@ export async function runHarness(mode = "1"): Promise<void> {
     await sleep(300);
     check(
       "a terminal with no selection offers everything but copy",
-      menuLabels() === "붙여넣기|모두 선택|화면 지우기",
+      menuLabels() === "모두 복사|붙여넣기|모두 선택|화면 지우기|입력 모드 초기화",
       menuLabels(),
     );
     await dismissMenu();
@@ -1453,7 +1589,7 @@ export async function runHarness(mode = "1"): Promise<void> {
     await sleep(300);
     check(
       "a selection adds copy to the menu",
-      menuLabels() === "복사|붙여넣기|모두 선택|화면 지우기",
+      menuLabels() === "복사|모두 복사|붙여넣기|모두 선택|화면 지우기|입력 모드 초기화",
       menuLabels(),
     );
 
@@ -1500,6 +1636,132 @@ export async function runHarness(mode = "1"): Promise<void> {
     }
     getEntry(panePlain)?.term.clearSelection();
     await dismissMenu();
+
+    /*
+     * --- 모두 복사, the copy that needs no selection first ---
+     *
+     * Asserted on a pane with nothing selected, because that is the state it
+     * exists for: the one where 복사 is not offered at all.
+     */
+    getEntry(panePlain)?.term.clearSelection();
+    rightClick(host);
+    await sleep(300);
+    const copyAllItem = menuItem("모두 복사");
+    check("the menu has 모두 복사 with nothing selected", Boolean(copyAllItem));
+    const heldBeforeAll = focused ? await navigator.clipboard.readText().catch(() => null) : null;
+    if (copyAllItem) {
+      await pressItem(copyAllItem);
+      await sleep(600);
+      check("모두 복사 runs and closes the menu", !document.querySelector(".context-menu"));
+      check(
+        "and it leaves nothing highlighted behind it",
+        getEntry(panePlain)?.term.getSelection() === "",
+      );
+      if (focused) {
+        const grabbed = await navigator.clipboard.readText().catch(() => "");
+        check(
+          "모두 복사 puts the whole buffer on the clipboard",
+          grabbed.includes(MARK),
+          `${grabbed.length} chars`,
+        );
+        if (heldBeforeAll !== null) {
+          await navigator.clipboard.writeText(heldBeforeAll).catch(() => {});
+        }
+      } else {
+        await logLine(
+          "harness SKIP 모두 복사 reaches the clipboard — the window could not take focus",
+        );
+      }
+    }
+    await dismissMenu();
+
+    /*
+     * --- a CLI that left the pane reporting mouse moves ---
+     *
+     * claude and codex both ask for mouse and focus reporting, and a CLI pane
+     * deliberately keeps a shell alive after its CLI exits (see `spawn.rs`). A
+     * CLI killed before it could switch that reporting off therefore hands a
+     * live cmd.exe a terminal that narrates every mouse move at it — and cmd,
+     * which has no `reset` of its own, types those escape codes onto its command
+     * line. Both cures are checked here through real mouse events: xterm.js is
+     * what decides whether to report, so only an event can prove it stopped.
+     */
+    const screenEl = host.querySelector<HTMLElement>(".xterm-screen");
+    const entry = getEntry(panePlain);
+    check("the terminal has a screen element to move a mouse over", Boolean(screenEl && entry));
+
+    if (screenEl && entry) {
+      const box = screenEl.getBoundingClientRect();
+      /** Whatever the pane sends on its own while a mouse crosses three cells. */
+      const reportsWhileMoving = async (fromX: number): Promise<string> => {
+        let sent = "";
+        const spy = entry.term.onData((data) => {
+          sent += data;
+        });
+        for (const step of [0, 1, 2]) {
+          screenEl.dispatchEvent(
+            new MouseEvent("mousemove", {
+              bubbles: true,
+              // Wide steps on purpose: xterm reports a move only when the cell
+              // under the pointer changes, and a cell is about eight pixels.
+              clientX: box.left + fromX + step * 24,
+              clientY: box.top + 24 + step * 20,
+            }),
+          );
+          await sleep(60);
+        }
+        spy.dispose();
+        return sent;
+      };
+
+      /** Stands in for the dead CLI: modes switched on and never switched off. */
+      const leaveModesOn = async () => {
+        entry.term.write("\x1b[?1003h\x1b[?1006h\x1b[?1004h");
+        await sleep(250);
+      };
+
+      await leaveModesOn();
+      const narrating = await reportsWhileMoving(40);
+      check(
+        "a CLI's leftover mouse mode really does make the pane narrate moves",
+        narrating.includes("\x1b[<"),
+        JSON.stringify(narrating).slice(0, 90),
+      );
+
+      // 1. The manual cure, pressed the way a user presses it.
+      rightClick(host);
+      await sleep(300);
+      const resetItem = menuItem("입력 모드 초기화");
+      check("the menu offers 입력 모드 초기화", Boolean(resetItem));
+      if (resetItem) await pressItem(resetItem);
+      await sleep(500);
+      const afterReset = await reportsWhileMoving(64);
+      check("입력 모드 초기화 stops the narration", afterReset === "", JSON.stringify(afterReset));
+
+      // 2. The automatic cure. cmd.exe echoes what it cannot read, and that echo
+      //    arriving as output is the proof that nothing is reading it.
+      await leaveModesOn();
+      const toEcho = await reportsWhileMoving(40);
+      check("the pane narrates again once a CLI asks again", toEcho.includes("\x1b[<"));
+      // As cmd.exe actually echoes it: the ESC comes back as the two characters
+      // `^` and `[`, which is why the pane shows the codes instead of obeying them.
+      writeOutput(entry, toEcho.replace(/\x1b/g, "^["));
+      await sleep(500);
+      const afterEcho = await reportsWhileMoving(64);
+      check(
+        "an echoed report switches the narration off by itself",
+        afterEcho === "",
+        JSON.stringify(afterEcho),
+      );
+      check(
+        "and the pane says so rather than going quiet unexplained",
+        screen(panePlain).includes("마우스"),
+      );
+
+      // The narration above was typed at a live shell; clear the line it built.
+      await writeSession(panePlain, "\x1b");
+      await sleep(300);
+    }
 
     /*
      * --- the other right-button setting: paste, with no menu at all ---

@@ -19,6 +19,9 @@ dist-ssr
 .env.mac
 *.p8
 
+# scripts/ 의 파이썬을 돌리면 생긴다.
+__pycache__/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

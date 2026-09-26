@@ -3,7 +3,7 @@ import type { SessionKind } from "../types";
 import ContextMenu from "../chrome/ContextMenu";
 import { useWorkspace } from "../store/workspace";
 import { listenForPathDrop } from "../sidebar/dnd";
-import { copyText, pasteInto, selectionOf } from "./clipboard";
+import { copyEverything, copyText, pasteInto, selectionOf } from "./clipboard";
 import { dropTextFor } from "./dropText";
 import { createSession, killSession, writeSession } from "./ipc";
 import {
@@ -11,12 +11,28 @@ import {
   createEntry,
   disposeEntry,
   getEntry,
+  isMeasurable,
+  noteInput,
+  resetInputModes,
   syncSize,
   writeOutput,
 } from "./termRegistry";
 
 /** ConPTY repaints the whole screen on resize, so coalesce bursts of them. */
 const RESIZE_DEBOUNCE_MS = 80;
+
+/**
+ * The grid a pane is spawned with when it mounts inside a hidden stage — every
+ * project but the active one, each time the app starts.
+ *
+ * There is nothing to measure there, and measuring anyway yields about ten
+ * columns, which is what the child would then be told it has. An ordinary size
+ * is a better guess than a wrong measurement: the shell comes up readable, and
+ * the first time the pane is actually shown `syncSize` replaces this with the
+ * real thing.
+ */
+const HIDDEN_SPAWN_COLS = 120;
+const HIDDEN_SPAWN_ROWS = 30;
 
 interface Props {
   paneId: string;
@@ -49,13 +65,22 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
 
     const entry = createEntry(paneId, fontSizeRef.current);
     entry.term.open(host);
+    entry.host = host;
     attachWebgl(entry);
-    entry.fit.fit();
+    if (isMeasurable(entry)) {
+      entry.fit.fit();
+    } else {
+      // Resized rather than left at xterm's default so the grid and the PTY agree
+      // on one size; the pane is hidden, so nothing is drawn twice for it.
+      entry.term.resize(HIDDEN_SPAWN_COLS, HIDDEN_SPAWN_ROWS);
+    }
 
     // Wire input before spawning: ConPTY opens with a cursor-position query and
     // stays silent until the terminal answers, and that answer comes through
     // onData like any keystroke.
     const onData = entry.term.onData((data) => {
+      // Before the write, so a report is on record by the time its echo arrives.
+      noteInput(entry, data);
       void writeSession(paneId, data);
     });
     const onBinary = entry.term.onBinary((data) => {
@@ -192,11 +217,17 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
             ...(menu.selection
               ? [{ label: "복사", onSelect: () => void copyText(menu.selection) }]
               : []),
+            // The one copy that needs no selection first, which is what a pane
+            // full of something worth reporting usually is.
+            { label: "모두 복사", onSelect: () => void copyEverything(paneId) },
             { label: "붙여넣기", onSelect: () => void pasteInto(paneId) },
             { label: "모두 선택", onSelect: () => getEntry(paneId)?.term.selectAll() },
             // Scrollback only: the shell keeps its prompt and whatever is typed
             // on it, which `cls` would not.
             { label: "화면 지우기", onSelect: () => getEntry(paneId)?.term.clear() },
+            // For the pane a CLI left reporting mouse moves at a shell that only
+            // echoes them; see `writeOutput`. cmd.exe has no `reset` of its own.
+            { label: "입력 모드 초기화", onSelect: () => resetInputModes(paneId) },
           ]}
         />
       )}
