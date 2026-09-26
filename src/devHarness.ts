@@ -33,7 +33,7 @@ import {
 } from "./terminal/ipc";
 import { getEntry, writeOutput } from "./terminal/termRegistry";
 import { bellIsSeen, clearAttention } from "./terminal/status";
-import { dropTextFor } from "./terminal/dropText";
+import { dropTextFor, quoteForShell } from "./terminal/dropText";
 import { handleDropPayload, type DroppedPath } from "./sidebar/dnd";
 import { RELEASES_PAGE, checkForUpdate, currentVersion, isNewer } from "./update";
 import { fileManagerName, isMac, isWindows, pathSep } from "./platform";
@@ -51,8 +51,18 @@ const PATH_PLAIN =
 const PATH_SPACES =
   import.meta.env.VITE_ICECMD_PATH_SPACES ??
   (isWindows ? "D:\\Naver MYBOX\\2. Works\\Personal\\IceCmd" : "/Users/ice/dev/Ice Cmd Test");
+/*
+ * 따옴표 규칙 검사에 쓰는 경로. 위의 둘과 달리 **실재할 필요가 없고, 오히려 기계마다
+ * 달라서는 안 된다** — `dropTextFor` 는 순수 함수다. 실제 폴더 이름에 한글이 들어
+ * 있으면(이 저장소의 경로가 그렇다) POSIX 규칙은 그것까지 감싸므로, 기계 경로로
+ * 검사하면 "감쌀 필요 없는 경로는 그대로 둔다" 를 확인할 길이 아예 없어진다.
+ */
+const QUOTE_PLAIN = isWindows ? "D:\\dev\\IceCmd" : "/Users/ice/dev/IceCmd";
+const QUOTE_SPACES = isWindows ? "D:\\Naver MYBOX\\2. Works" : "/Users/ice/Naver MYBOX/2. Works";
 /** cmd 는 큰따옴표, POSIX 셸은 작은따옴표. */
-const PATH_SPACES_QUOTED = isWindows ? `"${PATH_SPACES}"` : `'${PATH_SPACES}'`;
+const QUOTE_SPACES_QUOTED = isWindows ? `"${QUOTE_SPACES}"` : `'${QUOTE_SPACES}'`;
+/** 한글이 든 경로 — 두 셸의 규칙이 실제로 갈리는 자리다(아래 검사에서 못 박는다). */
+const QUOTE_HANGUL = isWindows ? "D:\\dev\\개발" : "/Users/ice/dev/개발";
 
 /*
  * 하네스가 셸에 거는 말 — cmd 와 POSIX 셸은 변수 문법부터 다르다.
@@ -176,6 +186,43 @@ const menuLabels = () =>
   Array.from(document.querySelectorAll<HTMLButtonElement>(".context-menu button"))
     .map((button) => (button.textContent ?? "").trim())
     .join("|");
+
+/**
+ * 페인의 입력줄을 비운다 — 아무것도 실행하지 않고.
+ *
+ * **맥에서 `ESC` 로는 안 된다.** cmd 는 ESC 하나로 줄을 지우지만 zsh 에서 ESC 는
+ * *메타 접두사*여서, 뒤이어 도착한 글자들이 편집 명령으로 해석된다. 2026-09-26 의
+ * 첫 맥 실행이 그렇게 무너졌다 — 드롭이 적어 둔 따옴표가 열린 채 `quote>` 연속
+ * 입력으로 들어갔고, **그 뒤 검사들이 셸에 건 말이 전부 그 안으로 빨려 들어갔다.**
+ * 폴더 감시도 색 검사도 "명령이 실행되지 않아서" 실패했지 기능이 죽어서가 아니었다.
+ * `Ctrl+C` 는 줄 편집기를 그 자리에서 되돌린다 — 연속 입력 상태에서도 빠져나온다.
+ */
+const clearLine = (paneId: string) => writeSession(paneId, isWindows ? "\x1b" : "\x03");
+
+/**
+ * 화면에 그 글자가 있는가 — **맥에서는 `includes` 만으로는 답이 안 나온다.**
+ *
+ * macOS 는 파일 이름을 **NFD(자모가 분해된 형태)** 로 돌려준다. 그래서 셸이 찍은
+ * `개발` 과 우리가 들고 있는 `개발`(NFC)은 **코드포인트가 다르다.** 눈으로는 같은
+ * 글자여서, 어긋나도 로그를 아무리 들여다봐도 이유가 보이지 않는다 — 2026-09-26 의
+ * `auto shell cwd` 가 정확히 그렇게 실패했다. 양쪽을 같은 형태로 맞춘 뒤 본다.
+ */
+const sameText = (haystack: string, needle: string) =>
+  haystack.normalize("NFC").includes(needle.normalize("NFC"));
+
+/**
+ * 셸이 실제로 어느 폴더에서 열렸는지 — **프롬프트를 읽어서는 안 된다.**
+ *
+ * cmd 의 기본 프롬프트에는 전체 경로가 들어 있어서 화면만 훑어도 답이 나왔다.
+ * zsh 의 것에는 폴더 *이름*뿐이라(`… IceCmd %`) 같은 검사가 맥에서는 "열리긴 했는데
+ * 어디서 열렸는지는 모른다" 가 된다. 그래서 셸에 직접 묻는다. 되울린 명령줄에는
+ * 경로가 없으므로 질문과 답이 섞이지 않는다.
+ */
+async function shellCwdIs(paneId: string, want: string): Promise<boolean> {
+  await writeSession(paneId, isWindows ? "cd\r" : "pwd\r");
+  await sleep(900);
+  return sameText(screen(paneId), want);
+}
 
 const dismissMenu = async () => {
   document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
@@ -407,11 +454,11 @@ export async function runHarness(mode = "1"): Promise<void> {
   const paneSpaces = panesOf(idSpaces)[0];
   check(
     "auto shell cwd (plain path)",
-    screen(panePlain).includes("D:\\dev\\IceCmd"),
-    // Printed so a failure says whether the prompt was wrong or merely late.
+    await shellCwdIs(panePlain, PATH_PLAIN),
+    // Printed so a failure says whether the answer was wrong or merely late.
     `tail=${JSON.stringify(screen(panePlain).trim().slice(-60))}`,
   );
-  check("auto shell cwd (path with spaces)", screen(paneSpaces).includes("Naver MYBOX"));
+  check("auto shell cwd (path with spaces)", await shellCwdIs(paneSpaces, PATH_SPACES));
 
   // Noted before this run writes anything, to be compared at the end.
   const installedStateBefore = await askShell(panePlain, sizeProbe("state.json"));
@@ -524,7 +571,7 @@ export async function runHarness(mode = "1"): Promise<void> {
   check("splitting keeps the same shell process", await shellIsSameProcess(panePlain));
 
   const newPane = afterSplit.find((id) => id !== panePlain) ?? "";
-  check("new pane has its own live shell", screen(newPane).includes("D:\\dev\\IceCmd"));
+  check("new pane has its own live shell", await shellCwdIs(newPane, PATH_PLAIN));
   check("new pane is a different shell", !(await shellIsSameProcess(newPane)));
 
   // --- switching projects must not disturb the shells (R6) ---
@@ -1286,7 +1333,7 @@ export async function runHarness(mode = "1"): Promise<void> {
       // shell where it actually landed.
       check(
         "the shell really started in that folder",
-        screen(created).includes(folderPath),
+        await shellCwdIs(created, folderPath),
         `want=${folderPath}`,
       );
       if (created) useWorkspace.getState().closePane(created);
@@ -1304,15 +1351,25 @@ export async function runHarness(mode = "1"): Promise<void> {
    * drop in the wrong pane). Tauri's own delivery of the event is the one link
    * this cannot reach.
    */
-  check("quoting: a plain path is left alone", dropTextFor([PATH_PLAIN]) === PATH_PLAIN);
+  check("quoting: a plain path is left alone", dropTextFor([QUOTE_PLAIN]) === QUOTE_PLAIN);
   check(
     "quoting: a path with spaces is quoted",
-    dropTextFor([PATH_SPACES]) === PATH_SPACES_QUOTED,
-    dropTextFor([PATH_SPACES]),
+    dropTextFor([QUOTE_SPACES]) === QUOTE_SPACES_QUOTED,
+    dropTextFor([QUOTE_SPACES]),
   );
   check(
     "quoting: several paths are separated",
-    dropTextFor([PATH_PLAIN, PATH_SPACES]) === `${PATH_PLAIN} ${PATH_SPACES_QUOTED}`,
+    dropTextFor([QUOTE_PLAIN, QUOTE_SPACES]) === `${QUOTE_PLAIN} ${QUOTE_SPACES_QUOTED}`,
+  );
+  /*
+   * 한글 경로에서 두 규칙이 갈린다. POSIX 쪽 안전 집합은 ASCII 라 한글을 만나면
+   * 감싸고(그래도 같은 경로를 가리킨다), cmd 는 한글을 문법으로 읽지 않으니 그대로
+   * 둔다. 이 저장소의 경로에 한글이 들어 있어 실제로 마주친 갈래다.
+   */
+  check(
+    "quoting: a non-ASCII path follows that shell's rule",
+    dropTextFor([QUOTE_HANGUL]) === (isWindows ? QUOTE_HANGUL : `'${QUOTE_HANGUL}'`),
+    dropTextFor([QUOTE_HANGUL]),
   );
 
   const host = document.querySelector<HTMLElement>(`[data-pane="${panePlain}"] .terminal-host`);
@@ -1349,13 +1406,15 @@ export async function runHarness(mode = "1"): Promise<void> {
 
     await handleDropPayload({ type: "drop", paths: [dropped], position: inside }, target);
     await sleep(900);
+    // 규칙 자체는 위에서 검사했다. 여기서 보는 것은 **그 규칙대로 적혔는가** 다.
+    const droppedAsTyped = quoteForShell(dropped);
     check(
       "a drop on the pane types the path, quoted",
-      screen(panePlain).includes(`"${dropped}"`),
-      `want="${dropped}"`,
+      screen(panePlain).includes(droppedAsTyped),
+      `want=${droppedAsTyped}`,
     );
     // Nothing was executed and nothing should be: clear the line the drop typed.
-    await writeSession(panePlain, "\x1b");
+    await clearLine(panePlain);
     await sleep(500);
   }
 
@@ -1403,7 +1462,7 @@ export async function runHarness(mode = "1"): Promise<void> {
       `focused=${useWorkspace.getState().focusedPane[idPlain]}`,
     );
     // Nothing was executed and nothing should be: clear the line the drop typed.
-    await writeSession(panePlain, "\x1b");
+    await clearLine(panePlain);
     await sleep(600);
   }
 
@@ -1419,7 +1478,7 @@ export async function runHarness(mode = "1"): Promise<void> {
   await writeSession(panePlain, `echo probe>${probeName}\r`);
   await sleep(2000);
   check("a file made outside the app appears without a refresh", treeHasProbe());
-  await writeSession(panePlain, `del ${probeName}\r`);
+  await writeSession(panePlain, `${isWindows ? "del" : "rm"} ${probeName}\r`);
   await sleep(2000);
   check("and it leaves again when it is deleted", !treeHasProbe());
 
@@ -1816,7 +1875,7 @@ export async function runHarness(mode = "1"): Promise<void> {
       );
 
       // The narration above was typed at a live shell; clear the line it built.
-      await writeSession(panePlain, "\x1b");
+      await clearLine(panePlain);
       await sleep(300);
     }
 
@@ -1858,7 +1917,7 @@ export async function runHarness(mode = "1"): Promise<void> {
         `token=${token}`,
       );
       // Never executed: the line the paste typed is cleared before moving on.
-      await writeSession(panePlain, "\x1b");
+      await clearLine(panePlain);
       await sleep(400);
       if (heldClipboard !== null) {
         await navigator.clipboard.writeText(heldClipboard).catch(() => {});

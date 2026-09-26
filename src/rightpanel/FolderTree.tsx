@@ -24,8 +24,18 @@ interface Menu {
  * Windows compares paths case-insensitively, and the watcher can answer with a
  * different case (or a trailing separator) than the tree asked with. macOS is
  * case-insensitive by default too, and `\\?\` simply never appears there.
+ *
+ * 맥에는 대소문자 말고 하나가 더 있다: **한글 이름은 NFD(자모 분해)로 오간다.** 두
+ * 출처가 같은 글자를 다른 코드포인트로 말하면 이 비교가 조용히 어긋나고, 그러면
+ * 폴더 자동 갱신이 **에러 하나 없이** 멈춘다. 형태를 맞춰 두면 그 갈래가 없다
+ * (ASCII 에는 아무 일도 하지 않는다).
  */
-const sameDirKey = (path: string) => path.replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").toLowerCase();
+const sameDirKey = (path: string) =>
+  path
+    .normalize("NFC")
+    .replace(/^\\\\\?\\/, "")
+    .replace(/[\\/]+$/, "")
+    .toLowerCase();
 
 /** One frozen empty list, so a project with nothing open keeps a stable selector result. */
 const NOTHING_OPEN: string[] = [];
