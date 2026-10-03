@@ -42,7 +42,12 @@ export function watchIme(paneId: string, term: Terminal): () => void {
       return `${event.type} key=${JSON.stringify(event.key)} code=${event.keyCode}`;
     }
     if (event instanceof CompositionEvent) {
-      return `${event.type} data=${JSON.stringify(event.data)}`;
+      // Where xterm will draw the composition preview: at the real cursor, and
+      // only if that cursor is inside the viewport.
+      const buffer = term.buffer.active;
+      const row = buffer.baseY + buffer.cursorY - buffer.viewportY;
+      const cursor = `cursor=${buffer.cursorX},${buffer.cursorY} inView=${row >= 0 && row < term.rows}`;
+      return `${event.type} data=${JSON.stringify(event.data)} ${cursor}`;
     }
     if (event instanceof InputEvent) {
       return `${event.type} type=${event.inputType} data=${JSON.stringify(event.data)} composed=${event.composed}`;

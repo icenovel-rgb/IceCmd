@@ -6,7 +6,6 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { guardImeInput } from "./ime";
 import { ackOutput, resizeSession } from "./ipc";
 import { isWindows } from "../platform";
 
@@ -128,8 +127,6 @@ export function createEntry(paneId: string, fontSize: number): TermEntry {
       selectionBackground: "rgba(42, 191, 193, 0.30)",
     },
   });
-
-  guardImeInput(term);
 
   const fit = new FitAddon();
   term.loadAddon(fit);

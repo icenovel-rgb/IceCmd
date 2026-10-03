@@ -99,9 +99,11 @@ export async function runTour(): Promise<void> {
   await logLine("tour start");
   await wait(1500);
 
-  // 1. 폴더를 프로젝트로 등록 — 터미널이 그 폴더에서 열린다
+  // 1. 폴더를 프로젝트로 등록 — 빈 화면으로 열리고, cmd 버튼이 그 폴더에서 터미널을 연다
   const projectA = store.addProject(PROJECT_A.path, PROJECT_A.name);
   if (!projectA) return;
+  await wait(1400);
+  clickButton(".cli-shell");
   await wait(2600);
 
   const firstPane = panesOf(projectA)[0];
@@ -165,6 +167,9 @@ export async function runTour(): Promise<void> {
 
   // 7. 두 번째 프로젝트를 더하고 오가 본다
   const projectB = store.addProject(PROJECT_B.path, PROJECT_B.name);
+  await wait(900);
+  // 새 프로젝트가 화면에 있으니 cmd 버튼은 그 프로젝트에 터미널을 연다
+  clickButton(".cli-shell");
   await wait(2600);
   if (projectB) {
     store.setActiveProject(projectA);

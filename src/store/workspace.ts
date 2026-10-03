@@ -192,16 +192,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       set({ activeProjectId: projectId });
       return projectId;
     }
-    const paneId = newPaneId();
+    // No pane of its own: a cmd opened unasked only had to be split away again
+    // once the claude button was pressed. The stage says how to start one.
     set((state) => ({
       projects: [...state.projects, { id: projectId, name, path }],
-      layouts: { ...state.layouts, [projectId]: leaf(paneId) },
-      panes: {
-        ...state.panes,
-        [paneId]: { paneId, projectId, cwd: path, kind: "shell" },
-      },
       activeProjectId: projectId,
-      focusedPane: { ...state.focusedPane, [projectId]: paneId },
     }));
     return projectId;
   },

@@ -5,6 +5,8 @@ import { useWorkspace } from "../store/workspace";
 import { listenForPathDrop } from "../sidebar/dnd";
 import { copyEverything, copyText, pasteInto, selectionOf } from "./clipboard";
 import { dropTextFor } from "./dropText";
+import { guardImeInput } from "./ime";
+import { copyOnSelect } from "./copyOnSelect";
 import { createSession, killSession, writeSession } from "./ipc";
 import {
   attachWebgl,
@@ -66,6 +68,9 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
     const entry = createEntry(paneId, fontSizeRef.current);
     entry.term.open(host);
     entry.host = host;
+    // Needs the textarea that open() creates, and must be in place before any typing.
+    guardImeInput(entry.term);
+    const stopCopyOnSelect = copyOnSelect(entry.term, host);
     attachWebgl(entry);
     if (isMeasurable(entry)) {
       entry.fit.fit();
@@ -127,6 +132,7 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
     return () => {
       paneGone = true;
       stopImeWatch?.();
+      stopCopyOnSelect();
       observer.disconnect();
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       onData.dispose();

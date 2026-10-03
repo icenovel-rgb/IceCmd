@@ -193,11 +193,11 @@ export default function App() {
                   <PaneStage projectId={project.id} layout={layout} active={isActive} />
                 ) : (
                   <div className="empty-hint">
-                    페인이 없습니다.
+                    오른쪽에서 claude·codex·cmd를 눌러 시작하세요.
                     <br />
-                    오른쪽에서 cmd·claude·codex를 눌러 새로 여세요.
+                    이 프로젝트 폴더에서 열립니다.
                     <br />
-                    폴더를 여기로 끌어다 놓으면 프로젝트로 추가됩니다.
+                    다른 폴더를 여기로 끌어다 놓으면 프로젝트로 추가됩니다.
                   </div>
                 )}
               </div>
@@ -207,7 +207,7 @@ export default function App() {
             <div className="empty-hint">
               폴더를 여기나 왼쪽 사이드바로 끌어다 놓으면
               <br />
-              프로젝트가 추가되고 터미널이 열립니다.
+              프로젝트로 추가됩니다.
             </div>
           )}
         </div>

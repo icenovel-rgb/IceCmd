@@ -38,6 +38,12 @@ import { handleDropPayload, type DroppedPath } from "./sidebar/dnd";
 import { RELEASES_PAGE, checkForUpdate, currentVersion, isNewer } from "./update";
 import { fileManagerName, isMac, isWindows, pathSep } from "./platform";
 import { shellName } from "./shell";
+import { checkImeDelivery } from "./devHarnessIme";
+import {
+  checkCopyOnSelect,
+  checkCopyUnderMouseTracking,
+  installFakeClipboard,
+} from "./devHarnessCopy";
 
 /*
  * 검사에 쓰는 두 폴더 — **실제로 있는 폴더여야 한다.** 하네스는 여기에 프로젝트를
@@ -289,9 +295,10 @@ const sizeProbe = (name: string) =>
     : `echo TOKEN=$(stat -f%z "${STATE_DIR}/${name}" 2>/dev/null || echo 0)`;
 
 /**
- * Two-launch persistence check. `persist1` leaves a split project behind on
- * purpose; `persist2` runs after a restart and asserts it came back, then cleans
- * up. Restored panes must be plain shells, never a re-launched CLI.
+ * Two-launch persistence check. `persist1` leaves a project split between a
+ * shell and a CLI on purpose; `persist2` runs after a restart and asserts the
+ * project came back with no panes at all, then cleans up. Nothing is started
+ * for the user on launch — not a CLI, and not a cmd they did not ask for.
  */
 async function runPersistStage(stage: "persist1" | "persist2"): Promise<void> {
   await logLine(`harness ${stage} start`);
@@ -302,6 +309,7 @@ async function runPersistStage(stage: "persist1" | "persist2"): Promise<void> {
       check("persist1 addProject", false);
       return;
     }
+    useWorkspace.getState().openCli(id, "shell");
     useWorkspace.getState().openCli(id, "claude");
     await sleep(1200);
     check("persist1 left a split project", panesOf(id).length === 2);
@@ -318,17 +326,11 @@ async function runPersistStage(stage: "persist1" | "persist2"): Promise<void> {
   check("project restored after restart", Boolean(project), `projects=${state.projects.length}`);
   if (!project) return;
 
-  const restored = panesOf(project.id);
-  check("layout shape restored", restored.length === 2, `panes=${restored.length}`);
+  check("the project on screen is restored", state.activeProjectId === project.id);
   check(
-    "restored panes are plain shells",
-    restored.every((paneId) => state.panes[paneId]?.kind === "shell"),
-    restored.map((paneId) => state.panes[paneId]?.kind).join(","),
-  );
-  await sleep(2500);
-  check(
-    "restored panes have live shells",
-    restored.every((paneId) => screen(paneId).includes("D:\\dev\\IceCmd")),
+    "a restored project starts with no pane",
+    panesOf(project.id).length === 0 && Object.keys(state.panes).length === 0,
+    `panes=${panesOf(project.id).length} all=${Object.keys(state.panes).length}`,
   );
 
   useWorkspace.getState().removeProject(project.id);
@@ -368,6 +370,9 @@ async function runDemo(args: string): Promise<void> {
   const first = useWorkspace.getState().addProject(PATH_PLAIN, "IceCmd");
   const second = useWorkspace.getState().addProject(PATH_SPACES, "IceCmd-MYBOX");
   if (!first) return;
+  // Projects start empty, so each gets the shell it used to come with.
+  useWorkspace.getState().openCli(first, "shell");
+  if (second) useWorkspace.getState().openCli(second, "shell");
   useWorkspace.getState().setActiveProject(first);
   await sleep(2200);
   useWorkspace.getState().openCli(first, "shell");
@@ -439,7 +444,14 @@ export async function runHarness(mode = "1"): Promise<void> {
     useWorkspace.getState().setPrefs({ forceColor: false });
   }
 
-  // --- projects and their automatic terminal (R2, R3) ---
+  /*
+   * --- projects start empty; a terminal opens when one is asked for (R2, R3) ---
+   *
+   * A pane that opened by itself was a cmd nobody asked for, and the claude
+   * button then had to share the stage with it. The shells below are opened by
+   * pressing the cmd button, the way a user would, so the road from the button
+   * to an empty project is checked as well as the store underneath it.
+   */
   const idPlain = useWorkspace.getState().addProject(PATH_PLAIN, "IceCmd");
   const idSpaces = useWorkspace.getState().addProject(PATH_SPACES, "IceCmd-MYBOX");
   if (!idPlain || !idSpaces) {
@@ -447,18 +459,47 @@ export async function runHarness(mode = "1"): Promise<void> {
     return;
   }
   check("two projects added", useWorkspace.getState().projects.length === 2);
-  check("each project starts with one pane", panesOf(idPlain).length === 1);
+  check(
+    "a new project starts with no pane",
+    panesOf(idPlain).length === 0 && panesOf(idSpaces).length === 0,
+    `panes=${panesOf(idPlain).length},${panesOf(idSpaces).length}`,
+  );
+  await sleep(300);
+  const shownStage = () =>
+    Array.from(document.querySelectorAll<HTMLElement>(".project-stage")).find(
+      (stage) => stage.style.display !== "none",
+    ) ?? null;
+  check(
+    "an empty project shows how to start one",
+    Boolean(shownStage()?.querySelector(".empty-hint")),
+  );
+
+  const pressCmd = () => document.querySelector<HTMLButtonElement>(".cli-shell")?.click();
+  // The project added last is the one on screen.
+  pressCmd();
+  useWorkspace.getState().setActiveProject(idPlain);
+  await sleep(300);
+  pressCmd();
+  check(
+    "the cmd button fills an empty project with one pane",
+    panesOf(idPlain).length === 1 && layoutOf(idPlain)?.type === "leaf" &&
+      panesOf(idSpaces).length === 1 && layoutOf(idSpaces)?.type === "leaf",
+    `panes=${panesOf(idPlain).length},${panesOf(idSpaces).length}`,
+  );
 
   await sleep(3000);
   const panePlain = panesOf(idPlain)[0];
   const paneSpaces = panesOf(idSpaces)[0];
   check(
-    "auto shell cwd (plain path)",
+    "the shell opens in the project folder (plain path)",
     await shellCwdIs(panePlain, PATH_PLAIN),
     // Printed so a failure says whether the answer was wrong or merely late.
     `tail=${JSON.stringify(screen(panePlain).trim().slice(-60))}`,
   );
-  check("auto shell cwd (path with spaces)", await shellCwdIs(paneSpaces, PATH_SPACES));
+  check(
+    "the shell opens in the project folder (path with spaces)",
+    await shellCwdIs(paneSpaces, PATH_SPACES),
+  );
 
   // Noted before this run writes anything, to be compared at the end.
   const installedStateBefore = await askShell(panePlain, sizeProbe("state.json"));
@@ -1482,38 +1523,27 @@ export async function runHarness(mode = "1"): Promise<void> {
   await sleep(2000);
   check("and it leaves again when it is deleted", !treeHasProbe());
 
-  /*
-   * --- the Hangul IME must not deliver a syllable twice ---
-   *
-   * The measured failure: on a keydown with keyCode 229 xterm.js queues a
-   * fallback that sends whatever appeared in its textarea a tick later, and the
-   * IME's own keypress has already sent the same syllable. Reproduced here by
-   * doing exactly that — announce an IME keystroke, then put a syllable in the
-   * textarea the way the IME does — and asserting nothing is sent.
-   */
+  // --- IME text reaches the shell exactly once: never twice, never not at all ---
   const imeEntry = getEntry(panePlain);
-  const imeArea = imeEntry?.term.textarea;
-  check("the terminal exposes the textarea the IME writes into", Boolean(imeArea));
-  if (imeEntry && imeArea) {
-    let sent = "";
-    const tap = imeEntry.term.onData((data) => {
-      sent += data;
-    });
-    const restore = imeArea.value;
-    imeArea.value = "";
+  check("the plain pane has a terminal to type into", Boolean(imeEntry));
+  if (imeEntry) await checkImeDelivery(imeEntry, check);
 
-    // `keyCode` is not settable through the constructor, and it is the only part
-    // of the event xterm.js looks at here.
-    const imeKey = new KeyboardEvent("keydown", { bubbles: true, cancelable: true });
-    Object.defineProperty(imeKey, "keyCode", { get: () => 229 });
-    imeArea.dispatchEvent(imeKey);
-    imeArea.value = "가";
-    await sleep(120);
-
-    tap.dispose();
-    imeArea.value = restore;
-    imeArea.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true }));
-    check("an IME keystroke queues no second send of the syllable", sent === "", JSON.stringify(sent));
+  // --- a mouse drag copies what it selected, so Ctrl+C is never needed for it ---
+  if (imeEntry) await checkCopyOnSelect(imeEntry, check, MARK);
+  // ...but never over a program that took the mouse. On a pane opened for it
+  // and closed after, so its echoed report stays off this one; see the module.
+  {
+    const before = panesOf(idPlain);
+    useWorkspace.getState().openCli(idPlain, "shell");
+    await sleep(2600);
+    const trackedPane = panesOf(idPlain).find((id) => !before.includes(id));
+    const trackedEntry = trackedPane ? getEntry(trackedPane) : undefined;
+    check("a second pane opens to drag over", Boolean(trackedEntry));
+    if (trackedPane && trackedEntry) {
+      await checkCopyUnderMouseTracking(trackedEntry, check, MARK);
+      useWorkspace.getState().closePane(trackedPane);
+      await sleep(1200);
+    }
   }
 
   /*
@@ -1708,44 +1738,45 @@ export async function runHarness(mode = "1"): Promise<void> {
     );
 
     /*
-     * The Clipboard API refuses to run while the document is unfocused, and
      * Windows will not bring a window forward on behalf of a background process,
-     * which is how this run is started. So the round trip is checked only when
-     * focus was actually obtained, and otherwise reported as skipped — never
-     * quietly passed. Click the window and run again to cover it.
+     * which is how this run is started, and the Clipboard API does not work for a
+     * window without focus. Worse, in WebView2 it does not *fail* either: each
+     * call waits, and fires the next time the window is focused — long after this
+     * section, with whatever is on the clipboard by then (see installFakeClipboard).
+     * So without focus the section runs against an in-memory clipboard: every
+     * step still runs and is checked, and the user's clipboard is never touched.
+     * Click the window and run again to cover the real API as well.
      */
     const focused = await getCurrentWindow()
       .setFocus()
       .then(() => sleep(700))
       .then(() => document.hasFocus())
       .catch(() => false);
+    const restoreClipboard = focused ? null : installFakeClipboard();
+    if (restoreClipboard) {
+      await logLine(
+        "harness NOTE no window focus — the clipboard checks below use an in-memory clipboard",
+      );
+    }
 
     const copyItem = menuItem("복사");
     check("the menu has the copy item", Boolean(copyItem));
 
-    const savedClipboard = focused ? await navigator.clipboard.readText().catch(() => null) : null;
+    const savedClipboard = await navigator.clipboard.readText().catch(() => null);
     if (copyItem) {
       await pressItem(copyItem);
       await sleep(600);
-      // True whether or not the clipboard is reachable: it says the press ran.
       check("the copy item runs and closes the menu", !document.querySelector(".context-menu"));
 
-      if (focused) {
-        const copied = await navigator.clipboard.readText().catch(() => "");
-        check(
-          "the copy item puts the selection on the clipboard",
-          copied.includes(MARK),
-          `${copied.length} chars`,
-        );
-        // The clipboard belongs to whoever is at the keyboard, so it goes back.
-        if (savedClipboard !== null) {
-          await navigator.clipboard.writeText(savedClipboard).catch(() => {});
-        }
-      } else {
-        await logLine(
-          "harness SKIP copy reaches the clipboard — the window could not take focus, " +
-            "and the Clipboard API refuses to run unfocused",
-        );
+      const copied = await navigator.clipboard.readText().catch(() => "");
+      check(
+        "the copy item puts the selection on the clipboard",
+        copied.includes(MARK),
+        `${copied.length} chars`,
+      );
+      // The clipboard belongs to whoever is at the keyboard, so it goes back.
+      if (savedClipboard !== null) {
+        await navigator.clipboard.writeText(savedClipboard).catch(() => {});
       }
     }
     getEntry(panePlain)?.term.clearSelection();
@@ -1762,7 +1793,7 @@ export async function runHarness(mode = "1"): Promise<void> {
     await sleep(300);
     const copyAllItem = menuItem("모두 복사");
     check("the menu has 모두 복사 with nothing selected", Boolean(copyAllItem));
-    const heldBeforeAll = focused ? await navigator.clipboard.readText().catch(() => null) : null;
+    const heldBeforeAll = await navigator.clipboard.readText().catch(() => null);
     if (copyAllItem) {
       await pressItem(copyAllItem);
       await sleep(600);
@@ -1771,20 +1802,14 @@ export async function runHarness(mode = "1"): Promise<void> {
         "and it leaves nothing highlighted behind it",
         getEntry(panePlain)?.term.getSelection() === "",
       );
-      if (focused) {
-        const grabbed = await navigator.clipboard.readText().catch(() => "");
-        check(
-          "모두 복사 puts the whole buffer on the clipboard",
-          grabbed.includes(MARK),
-          `${grabbed.length} chars`,
-        );
-        if (heldBeforeAll !== null) {
-          await navigator.clipboard.writeText(heldBeforeAll).catch(() => {});
-        }
-      } else {
-        await logLine(
-          "harness SKIP 모두 복사 reaches the clipboard — the window could not take focus",
-        );
+      const grabbed = await navigator.clipboard.readText().catch(() => "");
+      check(
+        "모두 복사 puts the whole buffer on the clipboard",
+        grabbed.includes(MARK),
+        `${grabbed.length} chars`,
+      );
+      if (heldBeforeAll !== null) {
+        await navigator.clipboard.writeText(heldBeforeAll).catch(() => {});
       }
     }
     await dismissMenu();
@@ -1883,26 +1908,19 @@ export async function runHarness(mode = "1"): Promise<void> {
      * --- the other right-button setting: paste, with no menu at all ---
      *
      * This one *does* press paste, so the clipboard is loaded with a harmless
-     * token first and put back afterwards. When the window has no focus the
-     * Clipboard API refuses both, and then the only thing that can be asserted
-     * is the part that matters most anyway: no menu appeared.
+     * token first and put back afterwards. Without focus the clipboard is the
+     * in-memory one installed above. It used not to be: the press went out
+     * regardless, its `readText()` sat waiting in WebView2, and when the window
+     * was focused minutes later it pasted the user's clipboard into cmd.
      */
     useWorkspace.getState().setPrefs({ rightClick: "paste" });
     await sleep(200);
     const token = `${MARK}-rmb`;
-    /*
-     * Guarded by the same `focused` as the copy check above, and not merely
-     * because the call would fail: in WebView2 an unfocused `readText()` never
-     * settles at all — it neither resolves nor rejects, and the run stops there.
-     * Awaiting it unguarded hung this harness for ten minutes.
-     */
-    const heldClipboard = focused ? await navigator.clipboard.readText().catch(() => null) : null;
-    const armed = focused
-      ? await navigator.clipboard
-          .writeText(token)
-          .then(() => true)
-          .catch(() => false)
-      : false;
+    const heldClipboard = await navigator.clipboard.readText().catch(() => null);
+    const armed = await navigator.clipboard
+      .writeText(token)
+      .then(() => true)
+      .catch(() => false);
 
     rightClick(host);
     await sleep(800);
@@ -1923,10 +1941,7 @@ export async function runHarness(mode = "1"): Promise<void> {
         await navigator.clipboard.writeText(heldClipboard).catch(() => {});
       }
     } else {
-      await logLine(
-        "harness SKIP right-click paste reaches the shell — the window could not take " +
-          "focus, and the Clipboard API refuses to run unfocused",
-      );
+      check("the token can be put on the clipboard for the paste", false);
     }
     useWorkspace.getState().setPrefs({ rightClick: "menu" });
     await sleep(200);
@@ -1934,6 +1949,7 @@ export async function runHarness(mode = "1"): Promise<void> {
     await sleep(300);
     check("with 메뉴 표시 chosen, the menu is back", Boolean(document.querySelector(".context-menu")));
     await dismissMenu();
+    restoreClipboard?.();
   }
 
   /*
