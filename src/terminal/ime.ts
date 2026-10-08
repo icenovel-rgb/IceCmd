@@ -23,11 +23,40 @@
  * it: xterm's own input handler ignores a composed event while a key is down,
  * so such text went nowhere — a keystroke silently swallowed. That case is
  * delivered here instead, and only when neither a keypress nor xterm will.
+ *
+ * The macOS Korean IME in WKWebView does not compose at all (measured 0.6.7,
+ * typing 안녕하세요):
+ *
+ *   input insertText "ㅎ"             xterm sends "ㅎ"
+ *   input insertReplacementText "하"  the "ㅎ" is rewritten in place — dropped
+ *   input insertReplacementText "핫"
+ *   input insertReplacementText "하"  the ㅅ moves on to the next syllable,
+ *   input insertText "세"             which arrives whole
+ *
+ * xterm only knows insertText, so the shell kept the first jamo of every
+ * syllable that did not begin with a borrowed consonant: "ㅇㄴㅎ세요". A
+ * replacement is sent here as what it does to the textarea — one DEL per
+ * character it took away, then what it put in.
  */
 import type { Terminal } from "@xterm/xterm";
 
 /** Every IME keystroke arrives under this keyCode, whatever key was pressed. */
 const IME_KEY_CODE = 229;
+/** What the Backspace key sends; the line editor takes it as one character back. */
+const DEL = "\x7f";
+
+/**
+ * What turned `before` into `after`, both ending at the caret: how many
+ * characters came off the end and what went on. Counted in code points, so a
+ * Hangul syllable is one character — as it is to the line editor.
+ */
+function replacementEdit(before: string, after: string): string {
+  const old = Array.from(before);
+  const now = Array.from(after);
+  let same = 0;
+  while (same < old.length && same < now.length && old[same] === now[same]) same += 1;
+  return DEL.repeat(old.length - same) + now.slice(same).join("");
+}
 
 /** Call after `term.open()`: the textarea the IME writes into is created there. */
 export function guardImeInput(term: Terminal): void {
@@ -83,5 +112,20 @@ export function guardImeInput(term: Terminal): void {
     // Left open: an IME that commits twice under one key sends both, and nothing
     // else can deliver either while the key is down.
     term.input(event.data);
+  });
+
+  // The textarea as it stood before a replacement, read again once it has landed.
+  let beforeReplacement: string | null = null;
+  area.addEventListener("beforeinput", (event) => {
+    beforeReplacement = event.inputType === "insertReplacementText" ? area.value : null;
+  });
+  area.addEventListener("input", (event) => {
+    if (!(event instanceof InputEvent) || event.inputType !== "insertReplacementText") return;
+    const before = beforeReplacement;
+    beforeReplacement = null;
+    if (before === null) return;
+    // Rewriting a syllable as itself, which this IME does on every keystroke, sends nothing.
+    const edit = replacementEdit(before, area.value);
+    if (edit) term.input(edit);
   });
 }

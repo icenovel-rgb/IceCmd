@@ -161,6 +161,41 @@ export async function checkImeDelivery(entry: TermEntry, check: Check): Promise<
     `${SYLLABLE}나`,
   );
 
+  /*
+   * The macOS Korean IME (WKWebView) never composes: it inserts the first jamo
+   * and then rewrites the last character in place. Measured typing "하세":
+   * ㅎ, then 하, 핫, back to 하 when the ㅅ moves on, then 세 inserted whole.
+   * The shell has to end up with exactly what the textarea holds.
+   */
+  const replace = (data: string) => {
+    fire(new InputEvent("beforeinput", { bubbles: true, cancelable: true, composed: true, inputType: "insertReplacementText", data }));
+    area.value = Array.from(area.value).slice(0, -1).join("") + data;
+    fire(new InputEvent("input", { bubbles: true, composed: true, inputType: "insertReplacementText", data }));
+  };
+  const typed = await sentDuring(() => {
+    input("insertText", "ㅎ");
+    imeKeyDown();
+    replace("하");
+    imeKeyDown();
+    replace("핫");
+    imeKeyDown();
+    replace("하");
+    input("insertText", "세");
+    replace("세");
+  });
+  // Played on a line editor: each DEL takes back the character before it.
+  const typedLine = Array.from(typed).reduce<string[]>(
+    (line, ch) => (ch === "\x7f" ? line.slice(0, -1) : [...line, ch]),
+    [],
+  );
+  check(
+    "a syllable the IME rewrites in place reaches the shell as it ends up",
+    typedLine.join("") === "하세",
+    `sent=${JSON.stringify(typed)}`,
+  );
+  // Only the DELs it sent took anything back; what remains is still on the line.
+  landed += typedLine.length - typed.length;
+
   area.value = restore;
   // Every copy that went out was typed onto the shell's command line.
   if (landed > 0) await writeSession(entry.paneId, "\x7f".repeat(landed));
