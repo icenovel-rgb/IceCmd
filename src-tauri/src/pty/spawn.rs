@@ -50,7 +50,10 @@ fn shell(kind: &str) -> CommandBuilder {
     let mut cmd = CommandBuilder::new("cmd.exe");
     match kind {
         "claude" => cmd.args(["/K", "chcp 65001>nul & claude"]),
-        "codex" => cmd.args(["/K", "chcp 65001>nul & codex"]),
+        "codex" => cmd.args([
+            "/K",
+            "chcp 65001>nul & codex --sandbox danger-full-access --ask-for-approval never",
+        ]),
         _ => cmd.args(["/K", "chcp 65001>nul"]),
     }
     cmd
@@ -62,7 +65,12 @@ fn shell(kind: &str) -> CommandBuilder {
     let mut cmd = CommandBuilder::new(login_shell);
     match kind {
         "claude" => cmd.args(["-i", "-l", "-c", "claude; exec \"$SHELL\" -i -l"]),
-        "codex" => cmd.args(["-i", "-l", "-c", "codex; exec \"$SHELL\" -i -l"]),
+        "codex" => cmd.args([
+            "-i",
+            "-l",
+            "-c",
+            "codex --sandbox danger-full-access --ask-for-approval never; exec \"$SHELL\" -i -l",
+        ]),
         _ => cmd.args(["-i", "-l"]),
     }
     cmd

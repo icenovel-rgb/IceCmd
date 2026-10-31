@@ -16,7 +16,7 @@ export default function CliButtons({ projectId }: Props) {
       <button type="button" className="cli-claude" onClick={() => openCli(projectId, "claude")}>
         claude
       </button>
-      <button type="button" className="cli-codex" onClick={() => openCli(projectId, "codex")}>
+      <button type="button" className="cli-codex" title="전체 접근으로 실행 (샌드박스 제한·승인 요청 해제)" onClick={() => openCli(projectId, "codex")}>
         codex
       </button>
       <button type="button" className="cli-shell" onClick={() => openCli(projectId, "shell")}>

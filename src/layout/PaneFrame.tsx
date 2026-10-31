@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import TerminalComposer from "../terminal/TerminalComposer";
 import TerminalPane from "../terminal/TerminalPane";
 import { getEntry } from "../terminal/termRegistry";
 import { useWorkspace, type PaneMeta } from "../store/workspace";
@@ -25,6 +26,7 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
   const setFocusedPane = useWorkspace((s) => s.setFocusedPane);
   const focused = useWorkspace((s) => s.focusedPane[meta.projectId] === meta.paneId);
   const fontSize = useWorkspace((s) => s.ui.fontSize);
+  const frameRef = useRef<HTMLDivElement | null>(null);
 
   // A BEL is how Claude Code says it wants attention. xterm.js already parses
   // every byte for display, so hooking its event costs nothing extra.
@@ -39,13 +41,18 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
 
   useEffect(() => {
     if (!active || !focused) return;
-    getEntry(meta.paneId)?.term.focus();
+    const frame = frameRef.current;
+    // A click in the editor or terminal already chose its own focus target.
+    if (frame?.contains(document.activeElement)) return;
+    frame?.querySelector<HTMLTextAreaElement>("[data-terminal-composer] textarea")?.focus();
   }, [active, focused, meta.paneId]);
 
   return (
     <div
+      ref={frameRef}
       className={`pane-frame${focused ? " pane-focused" : ""}`}
       onPointerDown={() => setFocusedPane(meta.projectId, meta.paneId)}
+      onFocusCapture={() => setFocusedPane(meta.projectId, meta.paneId)}
     >
       <div className="pane-toolbar">
         <button
@@ -86,12 +93,15 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
           ✕
         </button>
       </div>
-      <TerminalPane
-        paneId={meta.paneId}
-        cwd={meta.cwd}
-        kind={meta.kind}
-        initialFontSize={fontSize}
-      />
+      <div className="pane-terminal-area">
+        <TerminalPane
+          paneId={meta.paneId}
+          cwd={meta.cwd}
+          kind={meta.kind}
+          initialFontSize={fontSize}
+        />
+      </div>
+      <TerminalComposer paneId={meta.paneId} targetLabel={kindLabel(meta.kind)} />
     </div>
   );
 }

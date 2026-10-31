@@ -1,0 +1,24 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import ts from "typescript";
+
+const source = readFileSync(new URL("../src/terminal/dictationText.ts", import.meta.url), "utf8");
+const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+const { dictationTextForTerminal: clean, composerInputForTerminal: compose } = await import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
+assert.equal(clean("한글 전사입니다."), "한글 전사입니다.");
+assert.equal(clean("echo first\r\necho second\n"), "echo first echo second");
+assert.equal(clean("a\rb\tc\u2028d\u2029e"), "a b c d e");
+assert.equal(clean("\u0003echo ok\u001b\u007f\u009b"), "echo ok");
+assert.equal(clean(" \r\n\t "), "");
+const dangerous = Array.from({ length: 160 }, (_, i) => String.fromCharCode(i)).join("");
+assert.doesNotMatch(clean(dangerous), /[\u0000-\u001f\u007f-\u009f]/);
+console.log("PASS: Korean text, line breaks, terminal controls, empty transcripts.");
+assert.equal(compose("한글 입력", false), "한글 입력\r");
+assert.equal(compose("echo first\necho second", false), "echo first echo second\r");
+assert.equal(compose("  if ok:\n    run()", true), "\x1b[200~  if ok:\r    run()\x1b[201~\r");
+assert.equal(compose("  if ok:\r\n    run()", true, false), "\x1b[200~  if ok:\r    run()\x1b[201~");
+assert.equal(compose("\u0003echo ok\u001b\u007f\u009b", false), "echo ok\r");
+assert.equal(compose(" \r\n\t ", true), "");
+assert.equal(compose(" \r\n\t ", false), "");
+assert.equal((compose("first\nsecond\n", false).match(/\r/g) ?? []).length, 1);
+console.log("PASS: one submit, safe cmd line, CLI multiline paste, indentation, insert-only encoding.");

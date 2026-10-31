@@ -1,4 +1,5 @@
 mod commands;
+mod dictation;
 mod fs_tree;
 mod persist;
 mod pty;
@@ -27,6 +28,8 @@ pub fn run() {
             commands::open_in_file_manager,
             commands::open_path,
             commands::reveal_path,
+            dictation::start_dictation,
+            dictation::stop_dictation,
             fs_tree::read_dir,
             fs_tree::path_info,
             watch::watch_dirs,

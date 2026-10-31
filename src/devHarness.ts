@@ -278,9 +278,11 @@ async function askShell(paneId: string, command: string): Promise<string> {
 }
 
 /** 앱 설정 폴더 — `app_config_dir()` 가 각 OS 에서 가리키는 바로 그 자리다. */
-const STATE_DIR = isWindows
+// Isolated native runs use a separate bundle identifier. Windows known-folder
+// APIs ignore an overridden APPDATA, so probes must use the app's actual path.
+const STATE_DIR = import.meta.env.VITE_ICECMD_STATE_DIR ?? (isWindows
   ? "%APPDATA%\\com.icenovel.icecmd"
-  : "$HOME/Library/Application Support/com.icenovel.icecmd";
+  : "$HOME/Library/Application Support/com.icenovel.icecmd");
 
 /**
  * Byte size of a file, or "0" when it does not exist.

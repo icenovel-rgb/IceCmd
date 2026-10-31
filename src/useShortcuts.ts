@@ -28,6 +28,8 @@ const ZOOM_OUT_KEYS = new Set(["-", "_", "Subtract"]);
 export function useShortcuts(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // Text editing belongs to the review field, including Ctrl+V / Cmd+V.
+      const inComposer = event.target instanceof Element && event.target.closest("[data-terminal-composer]");
       if (!hasMod(event) || event.altKey || hasOtherMod(event)) return;
       const { activeProjectId, focusedPane, splitPaneWith, closePane, nudgeFontSize, setFontSize } =
         useWorkspace.getState();
@@ -55,7 +57,7 @@ export function useShortcuts(): void {
         return;
       }
 
-      if (!paneId) return;
+      if (!paneId || inComposer) return;
       const key = event.key.toLowerCase();
 
       // 복사·붙여넣기. 페인의 우클릭 메뉴와 구현을 나눠 쓴다.
