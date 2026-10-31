@@ -39,6 +39,7 @@ import { RELEASES_PAGE, checkForUpdate, currentVersion, isNewer } from "./update
 import { fileManagerName, isMac, isWindows, pathSep } from "./platform";
 import { shellName } from "./shell";
 import { checkImeDelivery } from "./devHarnessIme";
+import { checkTypedAndSpoken } from "./devHarnessDictation";
 import {
   checkCopyOnSelect,
   checkCopyUnderMouseTracking,
@@ -1529,6 +1530,9 @@ export async function runHarness(mode = "1"): Promise<void> {
   const imeEntry = getEntry(panePlain);
   check("the plain pane has a terminal to type into", Boolean(imeEntry));
   if (imeEntry) await checkImeDelivery(imeEntry, check);
+
+  // --- full-width keystrokes reach the shell half-width; pastes and the mic do not get in the way ---
+  if (imeEntry) await checkTypedAndSpoken(imeEntry, panePlain, screen, check, MARK);
 
   // --- a mouse drag copies what it selected, so Ctrl+C is never needed for it ---
   if (imeEntry) await checkCopyOnSelect(imeEntry, check, MARK);

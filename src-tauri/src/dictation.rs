@@ -1,4 +1,8 @@
-//! Windows voice typing writes into the review textarea, never a PTY.
+//! Windows voice typing, opened on the focused terminal.
+//!
+//! The frontend focuses the pane's terminal first, so the panel types into the
+//! CLI's own prompt like a keyboard would. Nothing is sent to close it: the
+//! only key that does is Esc, and Esc in a claude pane interrupts the agent.
 
 #[tauri::command]
 pub fn start_dictation() -> Result<(), String> {
@@ -8,19 +12,7 @@ pub fn start_dictation() -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        Err("입력창에서 시스템 받아쓰기 단축키를 눌러 주세요.".into())
-    }
-}
-
-#[tauri::command]
-pub fn stop_dictation() -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        windows::stop()
-    }
-    #[cfg(not(windows))]
-    {
-        Ok(())
+        Err("터미널을 누른 뒤 시스템 받아쓰기 단축키를 눌러 주세요.".into())
     }
 }
 
@@ -29,7 +21,7 @@ mod windows {
     use windows_sys::Win32::UI::{
         Input::KeyboardAndMouse::{
             GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-            KEYEVENTF_KEYUP, VK_CONTROL, VK_ESCAPE, VK_H, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+            KEYEVENTF_KEYUP, VK_CONTROL, VK_H, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
         },
         WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId},
     };
@@ -85,7 +77,7 @@ mod windows {
                 );
             }
         }
-        Err("Windows 음성 입력을 제어하지 못했습니다. 입력창에서 Win+H를 눌러 주세요.".into())
+        Err("Windows 음성 입력을 제어하지 못했습니다. 터미널에서 Win+H를 눌러 주세요.".into())
     }
 
     pub fn start() -> Result<(), String> {
@@ -105,13 +97,5 @@ mod windows {
             key(VK_H, true),
             key(VK_LWIN, true),
         ])
-    }
-
-    pub fn stop() -> Result<(), String> {
-        // A late close must never inject a key into a different foreground app.
-        if !is_foreground() {
-            return Ok(());
-        }
-        send(&[key(VK_ESCAPE, false), key(VK_ESCAPE, true)])
     }
 }

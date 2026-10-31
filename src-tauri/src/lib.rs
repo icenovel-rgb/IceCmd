@@ -29,7 +29,6 @@ pub fn run() {
             commands::open_path,
             commands::reveal_path,
             dictation::start_dictation,
-            dictation::stop_dictation,
             fs_tree::read_dir,
             fs_tree::path_info,
             watch::watch_dirs,

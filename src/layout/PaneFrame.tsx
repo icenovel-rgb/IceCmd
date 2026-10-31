@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react";
-import TerminalComposer from "../terminal/TerminalComposer";
+import { useEffect, useRef, useState } from "react";
 import TerminalPane from "../terminal/TerminalPane";
+import { dictateInto } from "../terminal/dictation";
 import { getEntry } from "../terminal/termRegistry";
 import { useWorkspace, type PaneMeta } from "../store/workspace";
-import { modLabel } from "../platform";
+import { isWindows, modLabel } from "../platform";
 import { shellName } from "../shell";
 
 /**
@@ -12,6 +12,9 @@ import { shellName } from "../shell";
  */
 const kindLabel = (kind: PaneMeta["kind"]): string =>
   kind === "shell" ? shellName() : kind;
+
+/** How long a voice-typing message stays on the pane. */
+const NOTICE_MS = 6000;
 
 interface Props {
   meta: PaneMeta;
@@ -26,7 +29,22 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
   const setFocusedPane = useWorkspace((s) => s.setFocusedPane);
   const focused = useWorkspace((s) => s.focusedPane[meta.projectId] === meta.paneId);
   const fontSize = useWorkspace((s) => s.ui.fontSize);
-  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [notice, setNotice] = useState("");
+  const noticeTimer = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+
+  const dictate = async () => {
+    const message = await dictateInto(meta.paneId);
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    setNotice(message ?? "");
+    if (message) noticeTimer.current = window.setTimeout(() => setNotice(""), NOTICE_MS);
+  };
 
   // A BEL is how Claude Code says it wants attention. xterm.js already parses
   // every byte for display, so hooking its event costs nothing extra.
@@ -41,18 +59,13 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
 
   useEffect(() => {
     if (!active || !focused) return;
-    const frame = frameRef.current;
-    // A click in the editor or terminal already chose its own focus target.
-    if (frame?.contains(document.activeElement)) return;
-    frame?.querySelector<HTMLTextAreaElement>("[data-terminal-composer] textarea")?.focus();
+    getEntry(meta.paneId)?.term.focus();
   }, [active, focused, meta.paneId]);
 
   return (
     <div
-      ref={frameRef}
       className={`pane-frame${focused ? " pane-focused" : ""}`}
       onPointerDown={() => setFocusedPane(meta.projectId, meta.paneId)}
-      onFocusCapture={() => setFocusedPane(meta.projectId, meta.paneId)}
     >
       <div className="pane-toolbar">
         <button
@@ -69,6 +82,24 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
           ⠿
         </button>
         <span className="pane-kind">{kindLabel(meta.kind)}</span>
+        <button
+          type="button"
+          className="pane-mic"
+          aria-label="음성 입력"
+          title={
+            isWindows
+              ? "음성 입력 (Win+H) · 말한 내용이 이 터미널 입력란에 들어갑니다"
+              : "시스템 받아쓰기로 이 터미널에 입력"
+          }
+          // Keep focus in the terminal: the voice panel types into whatever holds it.
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => void dictate()}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <rect x="9" y="2" width="6" height="12" rx="3" />
+            <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />
+          </svg>
+        </button>
         {/* The glyph shows which way the new divider will run. */}
         <button
           type="button"
@@ -93,15 +124,17 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
           ✕
         </button>
       </div>
-      <div className="pane-terminal-area">
-        <TerminalPane
-          paneId={meta.paneId}
-          cwd={meta.cwd}
-          kind={meta.kind}
-          initialFontSize={fontSize}
-        />
-      </div>
-      <TerminalComposer paneId={meta.paneId} targetLabel={kindLabel(meta.kind)} />
+      {notice && (
+        <p className="pane-notice" role="status" onPointerDown={() => setNotice("")}>
+          {notice}
+        </p>
+      )}
+      <TerminalPane
+        paneId={meta.paneId}
+        cwd={meta.cwd}
+        kind={meta.kind}
+        initialFontSize={fontSize}
+      />
     </div>
   );
 }

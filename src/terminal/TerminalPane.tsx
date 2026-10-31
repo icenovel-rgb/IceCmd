@@ -5,6 +5,7 @@ import { useWorkspace } from "../store/workspace";
 import { listenForPathDrop } from "../sidebar/dnd";
 import { copyEverything, copyText, pasteInto, selectionOf } from "./clipboard";
 import { dropTextFor } from "./dropText";
+import { typedForPty } from "./halfWidth";
 import { guardImeInput } from "./ime";
 import { copyOnSelect } from "./copyOnSelect";
 import { createSession, killSession, writeSession } from "./ipc";
@@ -83,7 +84,19 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
     // Wire input before spawning: ConPTY opens with a cursor-position query and
     // stays silent until the terminal answers, and that answer comes through
     // onData like any keystroke.
-    const onData = entry.term.onData((data) => {
+    // xterm turns a native paste into onData synchronously inside its own
+    // listener, so a flag raised in the capture phase covers exactly that call.
+    let pasting = false;
+    const markPaste = () => {
+      pasting = true;
+      window.setTimeout(() => {
+        pasting = false;
+      }, 0);
+    };
+    host.addEventListener("paste", markPaste, true);
+    const onData = entry.term.onData((raw) => {
+      // Full-width mode and voice typing put "　" and "ｗ" where " " and "w" were meant.
+      const data = typedForPty(raw, pasting);
       // Before the write, so a report is on record by the time its echo arrives.
       noteInput(entry, data);
       void writeSession(paneId, data);
@@ -135,6 +148,7 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
       stopCopyOnSelect();
       observer.disconnect();
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      host.removeEventListener("paste", markPaste, true);
       onData.dispose();
       onBinary.dispose();
       void killSession(paneId);
