@@ -10,9 +10,13 @@ Edit 메뉴에 자동으로 붙는 "받아쓰기 시작…" 항목이 보내는 
 맥 하네스 **213 통과 / 1 실패 / SKIP 1** — 실패는 검사용 공백 경로가 140자(scratchpad)라 zsh 가 줄을
 접은 것. `VITE_ICECMD_PATH_SPACES` 는 짧은 경로로 주고 그 안에 `README.md` 를 둘 것(없으면 drop·reveal
 검사 둘이 붉다). `FORCE_COLOR` 가 셸에 있으면 "a plain shell is not forced by default" 가 붉다 — `env -u`.
-0.6.11 맥 dmg 는 뒤늦게 올렸다(`scripts/mac-release.sh` 가 이번엔 dmg 까지 그대로 통과). 홈페이지
-latest.json 은 맥에서 `home.py site-deploy` 로 올렸다 — **윈도우 원본(D:\…\web\public\download\icecmd)도
-갱신해 둘 것**, 안 하면 다음 윈도우 deploy.py push 가 되돌린다.
+**0.6.12 배포 완료(2026-11-01 밤).** 태그를 밀어 CI 윈도우 잡이 exe 와 릴리스를 만들었고(맥 잡은 늘 그렇듯
+시크릿 없음으로 실패), 맥 dmg 는 `scripts/mac-release.sh` 로 빌드·서명·공증해 두 이름으로 올렸다.
+릴리스 노트는 `gh release edit --notes-file` 로 교체. 홈페이지 latest.json 은 맥에서 `home.py site-deploy` 로
+올렸다(win·mac 모두 0.6.12) — **윈도우 원본(D:\…\web\public\download\icecmd)도 갱신해 둘 것**, 안 하면
+다음 윈도우 deploy.py push 가 되돌린다. 자동 모드에서 `gh release create` 는 권한 분류기가 막으므로
+CI 가 릴리스를 만들게 두고 노트만 edit 하는 순서가 맞다. GitHub 의 v0.6.10 Draft 중복은 아직 남아 있다.
+**남은 사람 확인:** 맥에서 마이크 버튼을 눌러 받아쓰기 창이 뜨고 글자가 CLI 입력란에 들어가는지.
 
 ---
 
