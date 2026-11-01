@@ -63,16 +63,17 @@ async function checkMicButton(entry: TermEntry, paneId: string, check: Check): P
   mic.dispatchEvent(press);
   check("pressing the mic does not take focus from the terminal", press.defaultPrevented);
 
-  // With focus, a click is a real Win+H on the user's screen. Only the
-  // unfocused path is driven here; the button still goes all the way to Rust.
-  if (isWindows && document.hasFocus()) {
+  // With focus, a click is a real Win+H / dictation panel on the user's
+  // screen. Only the unfocused path is driven here; the button still goes all
+  // the way to Rust, which is what refuses.
+  if ((isWindows || isMac) && document.hasFocus()) {
     check("mic click skipped: the window has focus and would open voice typing", true);
     return;
   }
   mic.click();
   await sleep(400);
   const notice = document.querySelector(`[data-pane="${paneId}"] .pane-notice`)?.textContent ?? "";
-  const expected = isWindows ? "IceCmd 창을 선택한" : `${isMac ? "macOS" : "시스템"} 받아쓰기`;
+  const expected = isWindows || isMac ? "IceCmd 창을 선택한" : "시스템 받아쓰기";
   check("the mic reports back on the pane", notice.includes(expected), JSON.stringify(notice));
   check("and the terminal holds focus for the voice panel", document.activeElement === entry.term.textarea);
   document.querySelector<HTMLElement>(`[data-pane="${paneId}"] .pane-notice`)?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));

@@ -77,7 +77,7 @@ export const logLine = (message: string) =>
 
 export const openExternal = (url: string) => invoke<void>("open_external", { url });
 
-/** Windows only: presses Win+H for the user. Rejects with a message to show. */
+/** Opens system voice typing (Win+H on Windows, dictation on macOS). Rejects with a message to show. */
 export const startDictation = () => invoke<void>("start_dictation");
 
 /** Opens a folder in Explorer / Finder / the desktop file manager. */

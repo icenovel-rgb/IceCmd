@@ -1,5 +1,23 @@
 # 다음 세션에서 할 일 (2026-11-01 갱신)
 
+**0.6.12 — 맥에서도 마이크가 받아쓰기를 연다.** 0.6.11 의 마이크는 윈도우 전용(Win+H)이었고 맥에선
+"단축키를 눌러 주세요" 안내만 띄웠다. 이제 `start_dictation` 이 맥에서 AppKit 의 `startDictation:` 액션을
+nil 타깃으로 보낸다(`dictation.rs` → `macos::start`, objc2/objc2-app-kit — tauri 가 이미 끌어오는 버전).
+Edit 메뉴에 자동으로 붙는 "받아쓰기 시작…" 항목이 보내는 바로 그 메시지라 응답자 사슬을 타고 NSApp 이
+받아 포커스된 텍스트 입력(터미널 textarea)에 받아쓰기를 연다. 창이 활성이 아니면 윈도우처럼 거절한다.
+`swift` 로 `NSApp.responds(to: startDictation:)` 가 true 인 것은 확인했지만, **실제로 받아쓰기 창이
+뜨고 글자가 들어가는지는 사람이 마이크를 눌러 봐야 한다.** 받아쓰기가 꺼져 있으면 시스템이 켤지 묻는다.
+맥 하네스 **213 통과 / 1 실패 / SKIP 1** — 실패는 검사용 공백 경로가 140자(scratchpad)라 zsh 가 줄을
+접은 것. `VITE_ICECMD_PATH_SPACES` 는 짧은 경로로 주고 그 안에 `README.md` 를 둘 것(없으면 drop·reveal
+검사 둘이 붉다). `FORCE_COLOR` 가 셸에 있으면 "a plain shell is not forced by default" 가 붉다 — `env -u`.
+0.6.11 맥 dmg 는 뒤늦게 올렸다(`scripts/mac-release.sh` 가 이번엔 dmg 까지 그대로 통과). 홈페이지
+latest.json 은 맥에서 `home.py site-deploy` 로 올렸다 — **윈도우 원본(D:\…\web\public\download\icecmd)도
+갱신해 둘 것**, 안 하면 다음 윈도우 deploy.py push 가 되돌린다.
+
+---
+
+## 0.6.11 때의 메모 (2026-11-01)
+
 **0.6.11 — 입력창을 빼고 마이크를 페인 툴바로, 전각 문자를 반각으로.**
 0.6.10 에서 넣은 터미널 아래 입력창(`TerminalComposer`)은 CLI 자체 입력란과 함께 입력란이 둘이라
 헷갈려서 뺐다. 마이크는 페인 툴바로 옮겼다 — 그 터미널에 포커스를 준 뒤 Win+H 를 누른다

@@ -7,15 +7,17 @@ import { getEntry } from "./termRegistry";
  *
  * The voice panel types into whatever holds focus, so the terminal is focused
  * first and the words land in the CLI's own prompt, where they can be edited
- * before Enter. Resolves to a line to show the user, or null when nothing needs
- * saying (on Windows the panel itself says it is listening).
+ * before Enter. Windows opens its voice typing (Win+H) and macOS its dictation
+ * (the built-in microphone); both say on screen that they are listening, so
+ * this resolves to null then. Elsewhere it resolves to a line telling the user
+ * which key to press.
  */
 export async function dictateInto(paneId: string): Promise<string | null> {
   const term = getEntry(paneId)?.term;
   if (!term) return "이 터미널은 종료되었습니다.";
   term.focus();
-  if (!isWindows) {
-    return `${isMac ? "macOS" : "시스템"} 받아쓰기 단축키를 눌러 주세요. 말한 내용이 이 터미널에 들어갑니다.`;
+  if (!isWindows && !isMac) {
+    return "시스템 받아쓰기 단축키를 눌러 주세요. 말한 내용이 이 터미널에 들어갑니다.";
   }
   try {
     await startDictation();

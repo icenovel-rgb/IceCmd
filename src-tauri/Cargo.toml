@@ -1,6 +1,6 @@
 [package]
 name = "icecmd"
-version = "0.6.11"
+version = "0.6.12"
 description = "Lightweight terminal project manager"
 authors = ["iceno"]
 license = "MIT"
@@ -36,6 +36,12 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 [target.'cfg(windows)'.dependencies]
 # Windows voice typing enters text into the review field, never the PTY.
 windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS dictation is asked for through AppKit's own `startDictation:` action.
+# Same versions tauri already pulls in, so nothing new is compiled.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
 
 # Smaller, faster binary. A panic in one PTY must not kill other sessions.
 [profile.release]

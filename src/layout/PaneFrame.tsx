@@ -3,7 +3,7 @@ import TerminalPane from "../terminal/TerminalPane";
 import { dictateInto } from "../terminal/dictation";
 import { getEntry } from "../terminal/termRegistry";
 import { useWorkspace, type PaneMeta } from "../store/workspace";
-import { isWindows, modLabel } from "../platform";
+import { isMac, isWindows, modLabel } from "../platform";
 import { shellName } from "../shell";
 
 /**
@@ -89,7 +89,9 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
           title={
             isWindows
               ? "음성 입력 (Win+H) · 말한 내용이 이 터미널 입력란에 들어갑니다"
-              : "시스템 받아쓰기로 이 터미널에 입력"
+              : isMac
+                ? "받아쓰기 · 말한 내용이 이 터미널 입력란에 들어갑니다"
+                : "시스템 받아쓰기로 이 터미널에 입력"
           }
           // Keep focus in the terminal: the voice panel types into whatever holds it.
           onPointerDown={(event) => event.preventDefault()}
