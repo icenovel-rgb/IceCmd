@@ -1024,13 +1024,19 @@ button:disabled {
   color: var(--muted);
 }
 
-/* 좌우 여백은 하단 컨트롤과 같은 10px로 맞춘다. */
+/* 좌우 여백은 하단 컨트롤과 같은 10px로 맞춘다. 위 줄은 CLI, 아래 줄은 셸이다. */
 .cli-buttons {
   display: flex;
+  flex-direction: column;
   gap: 6px;
   padding: 10px;
   background: var(--toolbar);
   border-bottom: 1px solid var(--seam);
+}
+
+.cli-row {
+  display: flex;
+  gap: 6px;
 }
 
 .cli-buttons button {

@@ -1,4 +1,9 @@
-export type SessionKind = "shell" | "claude" | "codex";
+/**
+ * "shell" is the ordinary shell every split opens (cmd, or the login shell on a
+ * Mac). The two admin kinds are the buttons under the CLIs and exist only on
+ * Windows; whether one really started elevated is `createSession`'s answer.
+ */
+export type SessionKind = "shell" | "claude" | "codex" | "agy" | "adminCmd" | "adminPs";
 
 /** Ordered by priority: a project shows the strongest state among its panes. */
 export type PaneStatus = "idle" | "busy" | "attention";

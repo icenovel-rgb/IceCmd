@@ -20,6 +20,8 @@ import {
 } from "./terminal/termRegistry";
 import { markExited, startStatusMonitor, stopStatusMonitor } from "./terminal/status";
 import { useShortcuts } from "./useShortcuts";
+import { isWindows } from "./platform";
+import { shellName } from "./shell";
 
 export default function App() {
   const projects = useWorkspace((s) => s.projects);
@@ -193,7 +195,7 @@ export default function App() {
                   <PaneStage projectId={project.id} layout={layout} active={isActive} />
                 ) : (
                   <div className="empty-hint">
-                    오른쪽에서 claude·codex·cmd를 눌러 시작하세요.
+                    오른쪽 버튼(claude·codex·agy·{isWindows ? "cmd·PowerShell" : shellName()})을 눌러 시작하세요.
                     <br />
                     이 프로젝트 폴더에서 열립니다.
                     <br />

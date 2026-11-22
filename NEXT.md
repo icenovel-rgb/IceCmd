@@ -1,4 +1,32 @@
-# 다음 세션에서 할 일 (2026-11-01 갱신)
+# 다음 세션에서 할 일 (2026-11-22 갱신)
+
+**0.6.13 — agy 버튼, 아래 줄에 관리자 cmd·PowerShell.** 버튼이 두 줄이 됐다. 위는 `claude | codex | agy`
+(agy 는 `--dangerously-skip-permissions`), 아래는 윈도우 `cmd | PowerShell`(관리자) · 맥 로그인 셸 하나.
+분할(Ctrl+Shift+D/E·툴바)과 폴더 트리 "여기서 cmd 열기"는 **일반 cmd 그대로**다(kind `shell`).
+
+**관리자는 윈도우 내장 sudo 의 인라인 모드로만 된다.** 윈도우는 열린 콘솔 안에서 권한을 못 올리고
+UAC 는 새 창을 띄운다. `pty/elevation.rs` 가 `HKLM\…\CurrentVersion\Sudo\Enabled == 3`(정책 키
+`HKLM\SOFTWARE\Policies\Microsoft\Windows\Sudo` 가 더 낮으면 불가)과 sudo.exe 존재를 **스폰할 때마다**
+읽고, 되면 `System32\sudo.exe --inline --chdir <cwd> System32\cmd.exe …` 로 띄운다. `create_session` 이
+**실제로 sudo 로 띄웠는지 bool 로 돌려주고**, 이름표 `cmd · 관리자` 는 그 답과 `session-exit` 로만 붙고
+떨어진다. 안 되면 같은 셸을 일반 권한으로 열고 **셸이** 노란 안내를 echo 한다 — 앱이 xterm 에 직접 쓰면
+ConPTY 재도색에 지워진다(리뷰 지적). 안내문에 `"` 를 넣지 말 것: portable-pty 가 `\"` 로 이스케이프하는데
+cmd 는 그걸 모른다(단위 검사가 막는다). sudo·cmd·powershell 을 전부 **System32 전체 경로**로 부르는 건
+프로젝트 폴더(에이전트가 승인 없이 쓰는 곳)의 같은 이름 파일이 먼저 잡히지 않게 하려는 것이다.
+
+**검증.** Rust 단위 6개(`cargo test --lib pty::`), 윈도우 하네스(결과는 커밋 메시지에). 하네스·투어는
+더 이상 셸 버튼을 누르지 않는다 — 윈도우에선 관리자 버튼이라 **UAC 창을 띄울 수 있다.** 대신 버튼 라벨
+배치를 검사한다. **아직 못 한 것:** ① 이 PC 의 sudo 가 꺼져 있어 **인라인 sudo 가 우리 ConPTY 안에서
+실제로 붙는지 실측 못 했다.** 켜는 법: 설정 → 시스템 → 개발자용 → sudo 사용 → 인라인(자동 모드
+분류기가 Claude 의 `sudo config` 실행을 막는다 — 사람이 켠다). 켠 뒤 확인할 것: UAC 승인 → `net session`
+성공, 공백 경로 cwd, 한글 echo, UAC 거절 시 이름표가 떨어지는지, **칸·앱을 닫은 뒤 관리자 cmd/PowerShell
+이 작업 관리자에 남지 않는지**(terminate 는 일반 권한 sudo.exe 만 죽인다). ② 맥 빌드·하네스.
+리뷰의 LOW 하나는 안 했다: 앱 자체를 관리자로 띄웠고 sudo 가 꺼져 있으면 셸은 관리자인데 안내문이
+"관리자 아님"이라고 말한다(TokenElevation 검사로 고칠 수 있다).
+
+---
+
+## 0.6.12 때의 메모 (2026-11-01)
 
 **0.6.12 — 맥에서도 마이크가 받아쓰기를 연다.** 0.6.11 의 마이크는 윈도우 전용(Win+H)이었고 맥에선
 "단축키를 눌러 주세요" 안내만 띄웠다. 이제 `start_dictation` 이 맥에서 AppKit 의 `startDictation:` 액션을

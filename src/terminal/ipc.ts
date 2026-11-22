@@ -29,13 +29,14 @@ export interface CreateSessionOptions {
  * terminal input: ConPTY opens with a cursor-position query and produces nothing
  * until the terminal answers it.
  */
+/** Resolves to whether the session was started as administrator. */
 export async function createSession(
   options: CreateSessionOptions,
   onData: (chunk: Uint8Array | string) => void,
-): Promise<void> {
+): Promise<boolean> {
   const channel = new Channel<RawChunk>();
   channel.onmessage = (chunk) => onData(toBytes(chunk));
-  await invoke("create_session", { args: options, onData: channel });
+  return invoke<boolean>("create_session", { args: options, onData: channel });
 }
 
 export const writeSession = (sessionId: string, data: string) =>

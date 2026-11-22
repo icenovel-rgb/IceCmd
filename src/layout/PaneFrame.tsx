@@ -5,13 +5,21 @@ import { getEntry } from "../terminal/termRegistry";
 import { useWorkspace, type PaneMeta } from "../store/workspace";
 import { isMac, isWindows, modLabel } from "../platform";
 import { shellName } from "../shell";
+import { ELEVATED_SUFFIX } from "../terminal/elevation";
+
+const PROGRAM_NAMES: Partial<Record<PaneMeta["kind"], string>> = {
+  adminCmd: "cmd",
+  adminPs: "PowerShell",
+};
 
 /**
  * 이름표는 그 페인이 실제로 띄운 프로그램의 이름이다. 셸만 기계마다 다르다 —
- * 윈도우는 cmd, 맥은 로그인 셸(zsh·bash).
+ * 윈도우는 cmd, 맥은 로그인 셸(zsh·bash). 관리자 꼬리는 실제로 올라간 칸에만 붙는다.
  */
-const kindLabel = (kind: PaneMeta["kind"]): string =>
-  kind === "shell" ? shellName() : kind;
+const kindLabel = (kind: PaneMeta["kind"], elevated: boolean): string => {
+  const name = kind === "shell" ? shellName() : (PROGRAM_NAMES[kind] ?? kind);
+  return elevated ? name + ELEVATED_SUFFIX : name;
+};
 
 /** How long a voice-typing message stays on the pane. */
 const NOTICE_MS = 6000;
@@ -30,6 +38,7 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
   const focused = useWorkspace((s) => s.focusedPane[meta.projectId] === meta.paneId);
   const fontSize = useWorkspace((s) => s.ui.fontSize);
   const [notice, setNotice] = useState("");
+  const [elevated, setElevated] = useState(false);
   const noticeTimer = useRef<number | null>(null);
 
   useEffect(
@@ -81,7 +90,7 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
         >
           ⠿
         </button>
-        <span className="pane-kind">{kindLabel(meta.kind)}</span>
+        <span className="pane-kind">{kindLabel(meta.kind, elevated)}</span>
         <button
           type="button"
           className="pane-mic"
@@ -136,6 +145,7 @@ export default function PaneFrame({ meta, active, onDragStart }: Props) {
         cwd={meta.cwd}
         kind={meta.kind}
         initialFontSize={fontSize}
+        onElevation={setElevated}
       />
     </div>
   );

@@ -87,6 +87,9 @@ pub struct SpawnConfig {
     pub rows: u16,
     /// Force colour on for a plain shell as well. CLI panes force it regardless.
     pub force_color: bool,
+    /// Start the shell through inline `sudo`. Decided by the caller, once, so
+    /// the answer it reports to the pane is the one that was acted on.
+    pub elevate: bool,
 }
 
 pub fn spawn(
@@ -104,7 +107,7 @@ pub fn spawn(
         .openpty(size)
         .map_err(|e| format!("openpty failed: {e}"))?;
 
-    let command = spawn::build(&cfg.kind, &cfg.cwd, cfg.force_color);
+    let command = spawn::build(&cfg.kind, &cfg.cwd, cfg.force_color, cfg.elevate);
     let mut child = pair
         .slave
         .spawn_command(command)

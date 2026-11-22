@@ -1,6 +1,6 @@
 [package]
 name = "icecmd"
-version = "0.6.12"
+version = "0.6.13"
 description = "Lightweight terminal project manager"
 authors = ["iceno"]
 license = "MIT"
@@ -35,7 +35,8 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [target.'cfg(windows)'.dependencies]
 # Windows voice typing enters text into the review field, never the PTY.
-windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+# The registry is read for one value: whether sudo is in inline mode (pty/elevation.rs).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS dictation is asked for through AppKit's own `startDictation:` action.

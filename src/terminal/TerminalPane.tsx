@@ -9,6 +9,9 @@ import { typedForPty } from "./halfWidth";
 import { guardImeInput } from "./ime";
 import { copyOnSelect } from "./copyOnSelect";
 import { createSession, killSession, writeSession } from "./ipc";
+import { isAdminKind } from "./elevation";
+import { listen } from "@tauri-apps/api/event";
+import type { SessionExit } from "../types";
 import {
   attachWebgl,
   createEntry,
@@ -43,6 +46,8 @@ interface Props {
   kind: SessionKind;
   /** Only used when the terminal is first created; later changes go through applyFontSize. */
   initialFontSize: number;
+  /** Told once, for an administrator pane, whether its shell really started elevated. */
+  onElevation?: (elevated: boolean) => void;
 }
 
 interface Menu {
@@ -52,10 +57,13 @@ interface Menu {
   selection: string;
 }
 
-export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Props) {
+export default function TerminalPane({ paneId, cwd, kind, initialFontSize, onElevation }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const fontSizeRef = useRef(initialFontSize);
   fontSizeRef.current = initialFontSize;
+  // A ref, not a dependency: a new callback must not respawn the shell.
+  const onElevationRef = useRef(onElevation);
+  onElevationRef.current = onElevation;
   const [menu, setMenu] = useState<Menu | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const rightClick = useWorkspace((s) => s.prefs.rightClick);
@@ -130,7 +138,21 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
         forceColor: useWorkspace.getState().prefs.forceColor,
       },
       (chunk) => writeOutput(entry, chunk),
-    );
+    )
+      .then((elevated) => {
+        if (!paneGone && isAdminKind(kind)) onElevationRef.current?.(elevated);
+      })
+      .catch((error: unknown) => {
+        if (paneGone) return;
+        entry.term.write(`\r\n\x1b[31m[셸을 시작하지 못했습니다: ${String(error)}]\x1b[0m\r\n`);
+      });
+
+    // 관리자 셸이 끝나면(UAC 거절 포함) 이름표의 "관리자"를 거둔다.
+    const stopExitWatch = isAdminKind(kind)
+      ? listen<SessionExit>("session-exit", (event) => {
+          if (!paneGone && event.payload.sessionId === paneId) onElevationRef.current?.(false);
+        })
+      : null;
 
     let resizeTimer: number | null = null;
     const observer = new ResizeObserver(() => {
@@ -144,6 +166,7 @@ export default function TerminalPane({ paneId, cwd, kind, initialFontSize }: Pro
 
     return () => {
       paneGone = true;
+      void stopExitWatch?.then((unlisten) => unlisten());
       stopImeWatch?.();
       stopCopyOnSelect();
       observer.disconnect();

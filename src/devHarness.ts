@@ -451,9 +451,10 @@ export async function runHarness(mode = "1"): Promise<void> {
    * --- projects start empty; a terminal opens when one is asked for (R2, R3) ---
    *
    * A pane that opened by itself was a cmd nobody asked for, and the claude
-   * button then had to share the stage with it. The shells below are opened by
-   * pressing the cmd button, the way a user would, so the road from the button
-   * to an empty project is checked as well as the store underneath it.
+   * button then had to share the stage with it. The shells below are opened on
+   * whichever project is on screen, as the buttons do — but not *by* a button:
+   * on Windows the shell buttons are administrator panes, and a harness must
+   * never put up a UAC prompt. The buttons themselves are checked by label.
    */
   const idPlain = useWorkspace.getState().addProject(PATH_PLAIN, "IceCmd");
   const idSpaces = useWorkspace.getState().addProject(PATH_SPACES, "IceCmd-MYBOX");
@@ -477,14 +478,29 @@ export async function runHarness(mode = "1"): Promise<void> {
     Boolean(shownStage()?.querySelector(".empty-hint")),
   );
 
-  const pressCmd = () => document.querySelector<HTMLButtonElement>(".cli-shell")?.click();
+  const rowLabels = (row: string) =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>(`.${row} button`)).map(
+      (button) => button.textContent ?? "",
+    );
+  const expectedShells = isWindows ? ["cmd", "PowerShell"] : [shellName()];
+  check(
+    "the buttons are claude·codex·agy over the shells",
+    rowLabels("cli-row-agents").join("|") === "claude|codex|agy" &&
+      rowLabels("cli-row-shells").join("|") === expectedShells.join("|"),
+    `agents=${rowLabels("cli-row-agents").join("|")} shells=${rowLabels("cli-row-shells").join("|")}`,
+  );
+
+  const openShellOnScreen = () => {
+    const { activeProjectId, openCli } = useWorkspace.getState();
+    if (activeProjectId) openCli(activeProjectId, "shell");
+  };
   // The project added last is the one on screen.
-  pressCmd();
+  openShellOnScreen();
   useWorkspace.getState().setActiveProject(idPlain);
   await sleep(300);
-  pressCmd();
+  openShellOnScreen();
   check(
-    "the cmd button fills an empty project with one pane",
+    "a shell fills an empty project with one pane",
     panesOf(idPlain).length === 1 && layoutOf(idPlain)?.type === "leaf" &&
       panesOf(idSpaces).length === 1 && layoutOf(idSpaces)?.type === "leaf",
     `panes=${panesOf(idPlain).length},${panesOf(idSpaces).length}`,

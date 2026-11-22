@@ -3,7 +3,7 @@
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, State};
 
-use crate::pty::{spawn_session, SessionManager, SpawnConfig};
+use crate::pty::{spawn_session, sudo_inline, wants_elevation, SessionManager, SpawnConfig};
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,14 +18,18 @@ pub struct CreateSessionArgs {
     pub force_color: bool,
 }
 
+/// Answers whether the session was started as administrator. Only an
+/// administrator pane can be, and only where sudo is in inline mode; the pane
+/// uses the answer for its label and, when it is no, to say why.
 #[tauri::command]
 pub fn create_session(
     app: AppHandle,
     sessions: State<'_, SessionManager>,
     args: CreateSessionArgs,
     on_data: Channel<InvokeResponseBody>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let id = args.session_id.clone();
+    let elevate = wants_elevation(&args.kind) && sudo_inline();
     let session = spawn_session(
         app,
         SpawnConfig {
@@ -35,11 +39,12 @@ pub fn create_session(
             cols: args.cols,
             rows: args.rows,
             force_color: args.force_color,
+            elevate,
         },
         on_data,
     )?;
     sessions.insert(id, session);
-    Ok(())
+    Ok(elevate)
 }
 
 #[tauri::command]

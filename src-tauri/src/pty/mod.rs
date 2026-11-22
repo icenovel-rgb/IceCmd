@@ -1,9 +1,11 @@
 //! Session registry. Owns every live PTY; knows nothing about projects or panes.
 
+mod elevation;
 mod flow;
 mod session;
 mod spawn;
 
+pub use elevation::{sudo_inline, wants_elevation};
 pub use session::{spawn as spawn_session, Session, SessionHandle, SpawnConfig};
 
 use parking_lot::Mutex;

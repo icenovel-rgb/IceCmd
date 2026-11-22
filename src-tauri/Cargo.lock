@@ -1349,7 +1349,7 @@ dependencies = [
 
 [[package]]
 name = "icecmd"
-version = "0.6.12"
+version = "0.6.13"
 dependencies = [
  "notify",
  "objc2",
