@@ -5,11 +5,15 @@
 - ✅ 커밋 `b8dee1f`, 태그 `v0.6.13`(annotated) push. CI 윈도우 잡 성공(run 44991523593) — 맥 잡은 늘 그렇듯 실패
 - ✅ GitHub 릴리스 v0.6.13 공개, `IceCmd-Setup-x64.exe` 2,371,447B. `releases/latest` = v0.6.13 → 윈도우 앱에 업데이트가 뜬다
 - ✅ 릴리스 노트 교체, `archive-to-mybox.py v0.6.13` 완료
-- ❌ **사이트 카드 미배포.** 원본 `latest.json` 은 win 0.6.13 / mac 0.6.12 로 고쳐 뒀다. 그러나 `deploy.py plan` 이
-  FTP `530 로그인 실패` — `~/.icenovel/credentials.json` 비번이 서버와 다르다. 이 PC 의 home 스킬 `.env` 에는 FTP 정보가
-  없다. 사람이 비번을 고친 뒤 `deploy.py plan` → `push --approved-by`. (FTP 비번 = DB 비번, 사이트 CLAUDE.md 참고)
-- ❌ 맥 dmg 없음. 맥 앱(0.6.12)은 사이트 mac 칸이 최신이라 GitHub 으로 떨어지고, dmg 없는 0.6.13 을 보고
-  릴리스 페이지로 안내한다 — 맥에서 `scripts/mac-release.sh` 로 dmg 를 올리면 풀린다.
+- ✅ **맥 dmg 올림 (16:32, 맥에서).** `scripts/mac-release.sh` → `IceCmd_0.6.13_universal.dmg` · `IceCmd-universal.dmg`
+  5,897,575B. `stapler validate` · `spctl` 둘 다 `Notarized Developer ID`, x86_64+arm64. 공증이 처음 세 번
+  `403 agreement missing` 이었다 — 대표가 애플 약관에 동의한 뒤에도 반영까지 20분쯤 걸렸다(재시도만 하면 된다).
+- ✅ **사이트 카드 배포 (16:58, 맥에서 `home.py site-deploy`).** `latest.json` win·mac 모두 0.6.13, 서버 백업
+  `_trash/2026-11-22/`. MYBOX 원본도 같은 내용이라 윈도우에서 다시 고칠 것 없다. FTP `530` 은 비번이 아니라
+  **닷홈 쪽 FTP 잠금**이었다 — 맥 `.env` 는 그대로였고 대표가 닷홈에서 풀자 바로 됐다. 윈도우
+  `~/.icenovel/credentials.json` 이 정말 틀린지는 다음 윈도우 배포 때 `deploy.py plan` 으로 다시 볼 것.
+- 맥 앱의 업데이트 알림은 **눈으로 보지 못했다.** 0.6.12 가 켜져 있었고(확인은 켤 때 한 번) 화면 캡처 권한이 없었다.
+  확인한 것: 사이트 mac 칸 0.6.13 > 0.6.12, `Access-Control-Allow-Origin: *`, 링크의 dmg sha256 이 검사한 파일과 같다.
 - 윈도우 하네스는 이번 커밋 전에 다시 돌리지 않았다(이전 세션 결과가 어디에도 남지 않았다).
 
 **0.6.13 — agy 버튼, 아래 줄에 관리자 cmd·PowerShell.** 버튼이 두 줄이 됐다. 위는 `claude | codex | agy`
