@@ -1,5 +1,17 @@
 # 다음 세션에서 할 일 (2026-11-22 갱신)
 
+**0.6.13 배포 상태 (2026-11-22 15시 실측).** ⚠ 앞선 세션은 코드만 고치고 「다 됐다」고 했다 — 커밋·태그·릴리스가
+하나도 없었다. **완료 선언 전에 `gh release view vX` 와 `releases/latest` API 로 확인할 것.**
+- ✅ 커밋 `b8dee1f`, 태그 `v0.6.13`(annotated) push. CI 윈도우 잡 성공(run 44991523593) — 맥 잡은 늘 그렇듯 실패
+- ✅ GitHub 릴리스 v0.6.13 공개, `IceCmd-Setup-x64.exe` 2,371,447B. `releases/latest` = v0.6.13 → 윈도우 앱에 업데이트가 뜬다
+- ✅ 릴리스 노트 교체, `archive-to-mybox.py v0.6.13` 완료
+- ❌ **사이트 카드 미배포.** 원본 `latest.json` 은 win 0.6.13 / mac 0.6.12 로 고쳐 뒀다. 그러나 `deploy.py plan` 이
+  FTP `530 로그인 실패` — `~/.icenovel/credentials.json` 비번이 서버와 다르다. 이 PC 의 home 스킬 `.env` 에는 FTP 정보가
+  없다. 사람이 비번을 고친 뒤 `deploy.py plan` → `push --approved-by`. (FTP 비번 = DB 비번, 사이트 CLAUDE.md 참고)
+- ❌ 맥 dmg 없음. 맥 앱(0.6.12)은 사이트 mac 칸이 최신이라 GitHub 으로 떨어지고, dmg 없는 0.6.13 을 보고
+  릴리스 페이지로 안내한다 — 맥에서 `scripts/mac-release.sh` 로 dmg 를 올리면 풀린다.
+- 윈도우 하네스는 이번 커밋 전에 다시 돌리지 않았다(이전 세션 결과가 어디에도 남지 않았다).
+
 **0.6.13 — agy 버튼, 아래 줄에 관리자 cmd·PowerShell.** 버튼이 두 줄이 됐다. 위는 `claude | codex | agy`
 (agy 는 `--dangerously-skip-permissions`), 아래는 윈도우 `cmd | PowerShell`(관리자) · 맥 로그인 셸 하나.
 분할(Ctrl+Shift+D/E·툴바)과 폴더 트리 "여기서 cmd 열기"는 **일반 cmd 그대로**다(kind `shell`).
